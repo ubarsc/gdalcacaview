@@ -1,4 +1,4 @@
-GDAL=-L$(GDAL_LIB_PATH) -lgdal -L$(LIBCACA_LIB_PATH) -lcaca
+GDAL=-L$(GDAL_LIB_PATH) $(GDAL_LINK_FLAGS) -L$(LIBCACA_LIB_PATH) -lcaca
 CFLAGS=-I$(GDAL_INCLUDE_PATH) -I$(LIBCACA_INCLUDE_PATH) $(LCRCFLAGS)
 CC=$(LCRCC)
 OUTNAME=gdalcacaview
@@ -9,11 +9,11 @@ all: gdalcacaview
 	$(CC) $(CFLAGS) -c $<
 
 gdalcacaview: gdalcacaview.o Makefile
-	$(CC) gdalcacaview.o $(GDAL) -o $(OUTNAME)
+	$(CC) gdalcacaview.o $(GDAL) $(LCRLDFLAGS) -o $(OUTNAME)
 
 install:
 	cp gdalcacaview $(LIBCACA_BIN_PATH)
 
 clean:
-	rm *.o $(OUTNAME)
+	rm -f *.o $(OUTNAME)
 	
