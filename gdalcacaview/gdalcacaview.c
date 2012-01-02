@@ -677,7 +677,7 @@ int gdal_get_best_overview(GDALDatasetH ds)
     while( count < GDALGetOverviewCount(bandh) )
     {
       GDALRasterBandH ovh = GDALGetOverview(bandh,count);
-      if( ( GDALGetRasterXSize(ovh) < MAX_OVERVIEW_SIZE ) && ( GDALGetRasterYSize(ovh) < MAX_OVERVIEW_SIZE ) )
+      if( ( GDALGetRasterBandXSize(ovh) < MAX_OVERVIEW_SIZE ) && ( GDALGetRasterBandYSize(ovh) < MAX_OVERVIEW_SIZE ) )
       {
         /* use this overview */
         overviewIndex = count;
@@ -695,6 +695,7 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
     FILE *fh = fopen(pszFilename,"w");
     if( fh != NULL )
     {
+        fprintf( fh, "width = %d height = %d\n", im->w, im->h );
         int xcount, ycount;
         for( ycount = 0; ycount < im->h; ycount++ )
         {
@@ -717,8 +718,8 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
     GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
-    im->w = GDALGetRasterXSize(ovh);
-    im->h = GDALGetRasterYSize(ovh);
+    im->w = GDALGetRasterBandXSize(ovh);
+    im->h = GDALGetRasterBandYSize(ovh);
     
     im->pixels = malloc(im->w * im->h * depth);
     if(!im->pixels)
@@ -803,8 +804,8 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
     GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
-    im->w = GDALGetRasterXSize(ovh);
-    im->h = GDALGetRasterYSize(ovh);
+    im->w = GDALGetRasterBandXSize(ovh);
+    im->h = GDALGetRasterBandYSize(ovh);
     
     /* Check we actually have thematic */
     const char *pszThematic = GDALGetMetadataItem(bandh,"LAYER_TYPE",NULL);
