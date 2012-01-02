@@ -11,6 +11,9 @@ all: gdalcacaview
 gdalcacaview: gdalcacaview.o Makefile
 	$(CC) gdalcacaview.o $(GDAL) -o $(OUTNAME)
 
+install:
+	cp gdalcacaview $(LIBCACA_BIN_PATH)
+
 clean:
 	rm *.o $(OUTNAME)
 	
