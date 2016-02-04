@@ -692,11 +692,12 @@ int gdal_get_best_overview(GDALDatasetH ds)
 void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
 {
     /* debugging routine for dumping contents of im->pixels to text file */
+    int xcount, ycount;
     FILE *fh = fopen(pszFilename,"w");
     if( fh != NULL )
     {
         fprintf( fh, "width = %d height = %d\n", im->w, im->h );
-        int xcount, ycount;
+        
         for( ycount = 0; ycount < im->h; ycount++ )
         {
             for( xcount = 0; xcount < im->w*depth; xcount++ )
@@ -711,6 +712,17 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
 
 int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
 {
+    int nBands[] = {5, 4, 2};
+    int count;
+    const char *pszStdDev, *pszMean;
+    double stddev, mean;
+    int pixcount;
+    /* tell libcaca how we have encoded the bytes */
+    /* red, then green, then blue */    
+    int rmask = 0xff0000;
+    int gmask = 0x00ff00;
+    int bmask = 0x0000ff;
+    int amask = 0x000000;
     /* Read a multiband image */
     /* Currently hardwired to read bands 5,4,2 as RGB */
     int depth = 3; /* this is always 24 bit */
@@ -732,8 +744,6 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
 
     /* read in our 3 bands */    
     /* we should be able to configure this */
-    int nBands[] = {5, 4, 2};
-    int count;
     for( count = 0; count < 3; count++ )
     {
       /* read in band interleaved by pixel */
@@ -746,8 +756,8 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
       GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, im->pixels+count, im->w, im->h, GDT_Byte, depth, im->w*depth );
       
       /* Get the stats for the Band */
-      const char *pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
-      const char *pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
+      pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
+      pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
       if( ( pszStdDev == NULL ) || ( pszMean == NULL ) )
       {
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
@@ -755,12 +765,11 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
         return -1;
       }
       
-      double stddev = atof( pszStdDev );
-      double mean = atof( pszMean );
+      stddev = atof( pszStdDev );
+      mean = atof( pszMean );
       
       /* now apply the standard deviation stretch */
       /* we should be able to configure how this works */
-      int pixcount;
       for( pixcount = count; pixcount < im->w*depth*im->h; pixcount += depth )
       {
         char val = im->pixels[pixcount];
@@ -776,12 +785,6 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
       */
     }
 
-    /* tell libcaca how we have encoded the bytes */
-    /* red, then green, then blue */    
-    int rmask = 0xff0000;
-    int gmask = 0x00ff00;
-    int bmask = 0x0000ff;
-    int amask = 0x000000;
 
     /* Create the libcaca dither */
     im->dither = caca_create_dither(8*depth, im->w, im->h, depth * im->w,
@@ -800,6 +803,10 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
 {
     /* Read a single band thematic image */
     int depth = 1; /* 8 bit */
+    int count;
+    const char *pszThematic;
+    uint32_t red[256], green[256], blue[256], alpha[256];
+    GDALColorTableH cth;
     
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
@@ -808,7 +815,7 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
     im->h = GDALGetRasterBandYSize(ovh);
     
     /* Check we actually have thematic */
-    const char *pszThematic = GDALGetMetadataItem(bandh,"LAYER_TYPE",NULL);
+    pszThematic = GDALGetMetadataItem(bandh,"LAYER_TYPE",NULL);
     if( (pszThematic == NULL) || (strcmp( pszThematic, "thematic" ) != 0 ))
     {
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Only support thematic single band images at the moment" );
@@ -829,13 +836,12 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
     /*gdal_dump_image("outfile.txt",depth,im);*/
 
     /* Set the palette */
-    uint32_t red[256], green[256], blue[256], alpha[256];
     memset(red,0,256 * sizeof(uint32_t));
     memset(green,0,256 * sizeof(uint32_t));
     memset(blue,0,256 * sizeof(uint32_t));
     memset(alpha,0,256 * sizeof(uint32_t));
     
-    GDALColorTableH cth = GDALGetRasterColorTable(bandh);
+    cth = GDALGetRasterColorTable(bandh);
     if( cth == NULL )
     {
         free(im->pixels);
@@ -843,7 +849,6 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
         return -1;
     }
     
-    int count;
     for( count = 0; count < GDALGetColorEntryCount(cth); count++)
     {
         const GDALColorEntry *colorentry = GDALGetColorEntry(cth,count);
@@ -873,14 +878,17 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
 
 struct image * gdal_load_image(char const * name)
 {
+    struct image * im;
+    GDALDatasetH ds;
+    int overviewIndex, nRasterCount;
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
 
     /* create our image structure */
-    struct image * im = malloc(sizeof(struct image));
+    im = malloc(sizeof(struct image));
     
     /* attempt to open with GDAL */
-    GDALDatasetH ds = GDALOpen(name,GA_ReadOnly);
+    ds = GDALOpen(name,GA_ReadOnly);
     if( ds == NULL )
     {
       free(im);
@@ -889,7 +897,7 @@ struct image * gdal_load_image(char const * name)
     }
     
     /* Find the best overview level to use */
-    int overviewIndex = gdal_get_best_overview(ds);
+    overviewIndex = gdal_get_best_overview(ds);
     if( overviewIndex == -1 )
     {
       free(im);
@@ -898,7 +906,7 @@ struct image * gdal_load_image(char const * name)
       return NULL;
     }
    
-    int nRasterCount = GDALGetRasterCount(ds);
+    nRasterCount = GDALGetRasterCount(ds);
     if( nRasterCount == 6 )
     {
       if( gdal_read_multiband(ds,im,overviewIndex) == -1 )

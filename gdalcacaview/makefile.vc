@@ -1,0 +1,11 @@
+
+LIBCACA_ROOT=C:\dev\libcaca-0.99.beta19.tar\libcaca-0.99.beta19
+GDAL_ROOT=C:\Users\sam\Miniconda3\envs\sam\Library
+CFLAGS = /Ox /nologo /I$(LIBCACA_ROOT)\caca /I$(GDAL_ROOT)\include
+
+.c.obj:
+  $(CC) $(CFLAGS) /Fo$*.obj /c $<
+  
+gdalcacaview.exe: gdalcacaview.obj
+    link.exe gdalcacaview.obj $(LIBCACA_ROOT)\win32\Release\x64\libcaca.lib $(GDAL_ROOT)\lib\gdal_i.lib /OUT:gdalcacaview.exe 
+
