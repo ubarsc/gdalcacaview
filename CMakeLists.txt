@@ -44,6 +44,10 @@ set(GDAL_LIBRARIES -L${GDAL_LIB_PATH} -lgdal)
 
 ###############################################################################
 # Build executables
+if(CMAKE_COMPILER_IS_GNUCC)
+    set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "-Wl,-rpath ${GDAL_LIB_PATH}")
+endif()
+
 add_executable(${GDALCACAVIEW_BIN_NAME} ${PROJECT_SOURCE_DIR}/gdalcacaview.c)
 target_link_libraries(${GDALCACAVIEW_BIN_NAME} ${GDAL_LIBRARIES} ${LIBCACA_LIBRARIES})
 install(TARGETS ${GDALCACAVIEW_BIN_NAME} DESTINATION bin PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
