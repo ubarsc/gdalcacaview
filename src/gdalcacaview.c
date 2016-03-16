@@ -22,8 +22,14 @@
 #   include <windows.h>
 #endif
 
+#if !defined(_WIN32) || defined(__CYGWIN__) 
+#include <sys/types.h>
+#include <pwd.h>
+#endif
+
 #include "caca.h"
 #include "gdal.h"
+#include "cpl_string.h"
 
 /* Local macros */
 #define MODE_IMAGE 1
@@ -47,6 +53,15 @@ caca_canvas_t *cv; caca_display_t *dp;
 #define GDAL_ERROR_SIZE 1024
 char szGDALMessages[GDAL_ERROR_SIZE];
 
+/* Default stretch rules */
+char *pszDefaultStretchRules[] = {"equal,1,1,colortable,none,,1",
+"equal,1,-1,greyscale,none,,1",
+"equal,2,-1,greyscale,none,,1",
+"equal,3,-1,rgb,none,,1|2|3",
+"less,6,-1,rgb,stddev,2.0,4|3|2",
+"greater,5,-1,rgb,stddev,2.0,5|4|2", NULL};
+
+
 /* stolen from common-image.h */
 struct image
 {
@@ -56,6 +71,43 @@ struct image
     void *priv;
 };
 
+/* constants from TuiView */
+#define VIEWER_COMP_LT 0
+#define VIEWER_COMP_GT 1
+#define VIEWER_COMP_EQ 2
+
+/* constants for specifying how to display an image */
+#define VIEWER_MODE_COLORTABLE 1
+#define VIEWER_MODE_GREYSCALE 2
+#define VIEWER_MODE_RGB 3
+#define VIEWER_MODE_PSEUDOCOLOR 4 /* not currently supported */
+
+/* how to stretch an image */
+#define VIEWER_STRETCHMODE_NONE 1 /* color table, or pre stretched data */
+#define VIEWER_STRETCHMODE_LINEAR 2
+#define VIEWER_STRETCHMODE_STDDEV 3
+#define VIEWER_STRETCHMODE_HIST 4
+
+struct stretch
+{
+    /* rule part */
+    int comp; /* one of VIEWER_COMP_* values */
+    int value;
+    int ctband; /* or -1 */
+
+    /* actual stretch part */
+    int mode; /* one of VIEWER_MODE_* */
+    int stretchmode;     /* VIEWER_STRETCHMODE_* */
+    double stretchparam[2];
+    int bands[3];
+};
+
+struct stretchlist
+{
+    int num_stretches;
+    struct stretch* stretches;
+};
+
 /* Local functions */
 static void print_status(void);
 static void print_help(int, int);
@@ -63,7 +115,7 @@ static void set_zoom(int);
 static void set_gamma(int);
 static void draw_checkers(int, int, int, int);
 
-extern struct image * gdal_load_image(char const *);
+extern struct image * gdal_load_image(char const *, struct stretchlist *);
 extern void gdal_unload_image(struct image *);
 
 /* Local variables */
@@ -73,6 +125,212 @@ float zoomtab[ZOOM_MAX + 1];
 float gammatab[GAMMA_MAX + 1];
 float xfactor = 1.0, yfactor = 1.0, dx = 0.5, dy = 0.5;
 int zoom = 0, g = 0, fullscreen = 0, mode, ww, wh;
+char *pszStretchStatusString = NULL;
+
+int stretch_from_string(struct stretch *newStretch, const char *pszString)
+{
+char **pszTokens;
+char **pszExtraTokens;
+char *pszTmp;
+int n = 0;
+int i;
+
+    pszTokens = CSLTokenizeString2(pszString, ",", 
+        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
+
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    if( strcmp(pszTmp, "less") == 0 )
+        newStretch->comp = VIEWER_COMP_LT;
+    else if( strcmp(pszTmp, "greater") == 0)
+        newStretch->comp = VIEWER_COMP_GT;
+    else if( strcmp(pszTmp, "equal") == 0)
+        newStretch->comp = VIEWER_COMP_EQ;
+    else
+    {
+        fprintf(stderr, "Unable to understand comparison %s\n", pszTmp);
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+
+    n++;
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    newStretch->value = atol(pszTmp);    
+
+    n++;
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    newStretch->ctband = atol(pszTmp);
+
+    n++;
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    if( strcmp(pszTmp, "colortable") == 0 )
+        newStretch->mode = VIEWER_MODE_COLORTABLE;
+    else if( strcmp(pszTmp, "greyscale") == 0)
+        newStretch->mode = VIEWER_MODE_GREYSCALE;
+    else if( strcmp(pszTmp, "rgb") == 0)
+        newStretch->mode = VIEWER_MODE_RGB;
+    else
+    {
+        fprintf(stderr, "Unable to understand mode %s\n", pszTmp);
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+
+    n++;
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    if( (strcmp(pszTmp, "none") == 0 ) || (strcmp(pszTmp, "") == 0))
+        newStretch->stretchmode = VIEWER_STRETCHMODE_NONE;
+    else if( strcmp(pszTmp, "linear") == 0)
+        newStretch->stretchmode = VIEWER_STRETCHMODE_LINEAR;
+    else if( strcmp(pszTmp, "stddev") == 0)
+        newStretch->stretchmode = VIEWER_STRETCHMODE_STDDEV;
+    else if( strcmp(pszTmp, "histogram") == 0)
+        newStretch->stretchmode = VIEWER_STRETCHMODE_HIST;
+    else
+    {
+        fprintf(stderr, "Unable to understand stretch mode %s\n", pszTmp);
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+
+    n++;
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    pszExtraTokens = CSLTokenizeString2(pszTmp, "|", CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
+    i = 0; 
+    while( i < 2 )
+    {
+        pszTmp = pszExtraTokens[i];
+        if( pszTmp == NULL )
+            break;
+        newStretch->stretchparam[i] = atof(pszTmp);
+        i++;
+    }
+    CSLDestroy(pszExtraTokens);
+
+    n++;
+    pszTmp = pszTokens[n];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing value in rule string\n");
+        CSLDestroy(pszTokens);
+        return 0;
+    }
+    pszExtraTokens = CSLTokenizeString2(pszTmp, "|", CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
+    i = 0; 
+    while( i < 3 )
+    {
+        pszTmp = pszExtraTokens[i];
+        if( pszTmp == NULL )
+            break;
+        newStretch->bands[i] = atol(pszTmp);
+        i++;
+    }
+    CSLDestroy(pszExtraTokens);
+
+    CSLDestroy(pszTokens);
+    return 1;
+}
+
+/* Returns stretch for given dataset worked out using the rules */
+/* returns NULL on failure */
+struct stretch *get_stretch_for_gdal(struct stretchlist *stretchList, GDALDatasetH ds)
+{
+int match, i, hasRed, hasGreen, hasBlue, hasAlpha, ncols, c;
+int rasterCount = GDALGetRasterCount(ds);
+struct stretch *pStretch;
+GDALRasterBandH bandh;
+GDALRasterAttributeTableH rath;
+const char *psz;
+GDALRATFieldUsage usage;
+
+    for( i = 0; i < stretchList->num_stretches; i++ )
+    {
+        match = 0;
+        pStretch = &stretchList->stretches[i];
+        if( pStretch->comp == VIEWER_COMP_LT)
+            match = rasterCount < pStretch->value;
+        else if( pStretch->comp == VIEWER_COMP_GT)
+            match = rasterCount > pStretch->value;
+        else if( pStretch->comp == VIEWER_COMP_EQ)
+            match = rasterCount == pStretch->value;
+        else
+        {
+            fprintf(stderr, "invalid value for comparison\n");
+            return NULL;
+        }
+
+        if( match && ( pStretch->ctband != -1) && (pStretch->ctband <= rasterCount) )
+        {
+            bandh = GDALGetRasterBand(ds, pStretch->ctband);
+            psz = GDALGetMetadataItem(bandh, "LAYER_TYPE", NULL);
+            if( (psz != NULL) && (strcmp(psz, "thematic") == 0))
+            {
+                hasRed = 0;
+                hasGreen = 0;
+                hasBlue = 0;
+                hasAlpha = 0;
+                rath = GDALGetDefaultRAT(bandh);
+                if( rath != NULL )
+                {
+                    ncols = GDALRATGetColumnCount(rath);
+                    for( c = 0; c < ncols; c++ )
+                    {
+                        usage = GDALRATGetUsageOfCol(rath, c);
+                        if( usage == GFU_Red )
+                            hasRed = 1;
+                        if( usage == GFU_Green )
+                            hasGreen = 1;
+                        if( usage == GFU_Blue )
+                            hasBlue = 1;
+                        if( usage == GFU_Alpha )
+                            hasAlpha = 1;
+                    }
+                }
+                match = hasRed && hasGreen && hasBlue && hasAlpha;
+            }
+        }
+
+        if( match )
+            return pStretch;
+    }
+
+    return NULL;
+}
 
 void printUsage()
 {
@@ -110,6 +368,121 @@ int main(int argc, char **argv)
     int current = 0, items = 0, opts = 1;
     int i;
     char *pszDriver = NULL;
+    char *pszConfigFile = NULL, *pszHomeDir = NULL;
+    char **pszConfigLines, **pszConfigSingleLine;
+    struct stretchlist stretchList;
+
+/* -------------------------------------------------------------------- */
+/*      Read config file if it exists                                   */
+/* -------------------------------------------------------------------- */
+#if defined(_WIN32) && !defined(__CYGWIN__) 
+    pszHomeDir = getenv("USERPROFILE");
+    if( pszHomeDir == NULL )
+    {
+        /* '.gcv' plus seperating slash plus terminating null */
+        pszConfigFile = malloc(strlen(pszHomeDir) + 6);
+        /* copy in the path */
+        strcpy(pszConfigFile, pszHomeDir);
+        
+    }
+    else
+    {
+        i = strlen(getenv("HOMEDRIVE")) + 1 + strlen(getenv("HOMEPATH")) + 6;
+        pszConfigFile = malloc(i);
+        strcpy(pszConfigFile, getenv("HOMEDRIVE"));
+        strcat(pszConfigFile, "\\");
+        strcat(pszConfigFile, getenv("HOMEPATH"));
+    }
+
+    /* slash and filename */
+    strcat(pszConfigFile, "\\.gcv");
+
+#else
+    struct passwd* pwd = getpwuid(getuid());
+    if( pwd != NULL )
+    {
+        pszHomeDir = pwd->pw_dir;
+    }
+    else
+    {
+        pszHomeDir = getenv("HOME");
+    }
+
+    /* '.gcv' plus seperating slash plus terminating null */
+    pszConfigFile = malloc(strlen(pszHomeDir) + 6);
+    /* copy in the path */
+    strcpy(pszConfigFile, pszHomeDir);
+    /* slash and filename */
+    strcat(pszConfigFile, "/.gcv");
+
+#endif
+
+    stretchList.num_stretches = 0;
+    stretchList.stretches = NULL;
+
+    /* don't show error if file doesn't exist */
+    CPLSetErrorHandler(CPLQuietErrorHandler);
+    pszConfigLines = CSLLoad(pszConfigFile);
+    CPLSetErrorHandler(NULL);
+
+    if( pszConfigLines != NULL )
+    {
+        /*fprintf(stderr, "reading config file %s\n", pszConfigFile);*/
+        i = 0;
+        while(pszConfigLines[i] != NULL)
+        {
+            pszConfigSingleLine = CSLTokenizeString2(pszConfigLines[i], "=", 
+                        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
+            if( ( pszConfigSingleLine[0] != NULL) && (pszConfigSingleLine[1] != NULL ) )
+            {
+                if( strcmp(pszConfigSingleLine[0], "Driver") == 0)
+                {
+                    pszDriver = strdup(pszConfigSingleLine[1]);
+                }
+                else if( strcmp(pszConfigSingleLine[0], "Rule") == 0)
+                {
+                    /* new rule */
+                    stretchList.num_stretches++;
+                    stretchList.stretches = (struct stretch*)realloc(stretchList.stretches, 
+                                    sizeof(struct stretch) * stretchList.num_stretches);
+                    if( !stretch_from_string(&stretchList.stretches[stretchList.num_stretches-1], pszConfigSingleLine[1]) )
+                    {
+                        exit(1);
+                    }
+                }
+            }
+            CSLDestroy(pszConfigSingleLine);
+
+            i++;
+        }
+
+        CSLDestroy(pszConfigLines);
+    }
+    else
+    {
+        /*fprintf(stderr, "no config file %s\n", pszConfigFile);*/
+    }
+
+    free(pszConfigFile);
+
+    /* if no rules were read in then use pszDefaultStretchRules */
+    if( stretchList.num_stretches == 0 )
+    {
+        /*fprintf(stderr, "No stretches supplied, using default\n");*/
+        i = 0;
+        while(pszDefaultStretchRules[i] != NULL)
+        {
+            stretchList.num_stretches++;
+            stretchList.stretches = (struct stretch*)realloc(stretchList.stretches, 
+                            sizeof(struct stretch) * stretchList.num_stretches);
+            if( !stretch_from_string(&stretchList.stretches[stretchList.num_stretches-1], pszDefaultStretchRules[i]) )
+            {
+                exit(1);
+            }
+            i++;
+        }
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Handle command line arguments.                                  */
 /* -------------------------------------------------------------------- */
@@ -124,7 +497,9 @@ int main(int argc, char **argv)
         {
             if( i+1 < argc )
             {
-                pszDriver = argv[i+1];
+                /* take copy since we free below */
+                /* be consistent with the config file approach above */
+                pszDriver = strdup(argv[i+1]);
                 i++;
             }
             else
@@ -187,6 +562,9 @@ int main(int argc, char **argv)
             fprintf(stderr, "Unable to initialise libcaca with driver %s\n", pszDriver);
             return 1;
         }
+        /* finished with it */
+        free(pszDriver);
+        pszDriver = NULL;
     }
     else
     {
@@ -441,7 +819,7 @@ int main(int argc, char **argv)
 
             if(im)
                 gdal_unload_image(im);
-            im = gdal_load_image(list[current]);
+            im = gdal_load_image(list[current], &stretchList);
             reload = 0;
 
             /* Reset image-specific runtime variables */
@@ -548,6 +926,8 @@ int main(int argc, char **argv)
     /* Clean up */
     if(im)
         gdal_unload_image(im);
+    if(pszStretchStatusString)
+        free(pszStretchStatusString);
     caca_free_display(dp);
     caca_free_canvas(cv);
 
@@ -565,6 +945,11 @@ static void print_status(void)
 /*    caca_printf(cv, 3, wh - 2, "cacaview %s", PACKAGE_VERSION);*/
     caca_printf(cv, ww - 30, wh - 2, "(gamma: %#.3g)", GAMMA(g));
     caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);
+
+    if( pszStretchStatusString != NULL )
+    {
+        caca_put_str(cv, 10, wh - 2, pszStretchStatusString);
+    }
 
     caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_BLACK);
     caca_draw_line(cv, 0, wh - 1, ww - 1, wh - 1, ' ');
@@ -665,7 +1050,6 @@ static void draw_checkers(int x, int y, int w, int h)
 /* OK dodgy code below added by gillins */
 
 #define MAX_OVERVIEW_SIZE 3000
-#define NUM_STDDEV 2
 
 int gdal_get_best_overview(GDALDatasetH ds)
 {
@@ -710,21 +1094,53 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
     }
 }
 
-int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
+int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *stretch)
 {
-    int nBands[] = {5, 4, 2};
-    int count;
+    int n;
     const char *pszStdDev, *pszMean;
     double stddev, mean;
-    int pixcount;
+      /* Get the stats for the Band */
+      if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV)
+      {
+          pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
+          pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
+          if( ( pszStdDev == NULL ) || ( pszMean == NULL ) )
+          {
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
+            return -1;
+          }
+      
+          stddev = atof( pszStdDev );
+          mean = atof( pszMean );
+      
+          /* now apply the standard deviation stretch */
+          for( n = 0; n < size; n++)
+          {
+            pBuffer[n] = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
+          }
+      }
+      else if( stretch->stretchmode != VIEWER_STRETCHMODE_NONE)
+      {
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "stretch not currently supported" );
+        return -1;
+      }
+
+    return 1;
+}
+
+int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch)
+{
+    int count;
+    int incount, outcount;
+    float *pBuffer;
+
     /* tell libcaca how we have encoded the bytes */
     /* red, then green, then blue */    
-    int rmask = 0xff0000;
+    int rmask = 0x0000ff;
     int gmask = 0x00ff00;
-    int bmask = 0x0000ff;
+    int bmask = 0xff0000;
     int amask = 0x000000;
     /* Read a multiband image */
-    /* Currently hardwired to read bands 5,4,2 as RGB */
     int depth = 3; /* this is always 24 bit */
     
     /* fill in the width and height from the overview */
@@ -741,43 +1157,42 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
     }
 
     memset(im->pixels, 0, im->w * im->h * depth);
+    
+    pBuffer = (float*)malloc(im->w * im->h * sizeof(float));
+    if(!pBuffer)
+    {
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to allocate memory for %d x %d image", im->w, im->h );
+        return -1;
+    }
 
     /* read in our 3 bands */    
-    /* we should be able to configure this */
     for( count = 0; count < 3; count++ )
     {
       /* read in band interleaved by pixel */
       /* Basically we make each line 3 times as long */
-      /* the first bixel is band 5, second is band 4 and third is band 2 */
-      /* and then back to band 5 etc. So we call RasterIO 3 times, one for */
+      /* the first bixel is band[0], second is band[1] and third is band[2] */
+      /* and then back to band[0] etc. So we call RasterIO 3 times, one for */
       /* each band and tell it to fill in every third pixel each time */
-      bandh = GDALGetRasterBand(ds,nBands[count]);
+      bandh = GDALGetRasterBand(ds,stretch->bands[count]);
       ovh = GDALGetOverview(bandh,overviewIndex);
-      GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, im->pixels+count, im->w, im->h, GDT_Byte, depth, im->w*depth );
-      
-      /* Get the stats for the Band */
-      pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
-      pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
-      if( ( pszStdDev == NULL ) || ( pszMean == NULL ) )
+
+      GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, pBuffer, im->w, im->h, GDT_Float32, sizeof(float), im->w*sizeof(float));
+
+      if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
       {
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
-        free(im->pixels);
-        return -1;
+          free(im->pixels);
+          free(pBuffer);
+          return -1;
       }
-      
-      stddev = atof( pszStdDev );
-      mean = atof( pszMean );
-      
-      /* now apply the standard deviation stretch */
-      /* we should be able to configure how this works */
-      for( pixcount = count; pixcount < im->w*depth*im->h; pixcount += depth )
+
+      /* copy into our bil */
+      outcount = count;
+      for(incount = 0; incount < (im->w * im->h); incount++ )
       {
-        char val = im->pixels[pixcount];
-        if( val != 0 )
-        {
-            im->pixels[pixcount] = ((val - mean + stddev * NUM_STDDEV) * 255)/(stddev * 2 *NUM_STDDEV);
-        }
+         im->pixels[outcount] = pBuffer[incount];
+         outcount += depth;
       }
+
       /*
       char szBuffer[64];
       snprintf( szBuffer, 64, "outfile%d.txt", count );
@@ -795,11 +1210,13 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex)
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to create dither" );
         return -1;
     }
+
+    free(pBuffer);
     
     return 0;
 }
 
-int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
+int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch)
 {
     /* Read a single band thematic image */
     int depth = 1; /* 8 bit */
@@ -809,7 +1226,7 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
     GDALColorTableH cth;
     
     /* fill in the width and height from the overview */
-    GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
+    GDALRasterBandH bandh = GDALGetRasterBand(ds,stretch->bands[0]);
     GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
     im->w = GDALGetRasterBandXSize(ovh);
     im->h = GDALGetRasterBandYSize(ovh);
@@ -876,11 +1293,48 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex)
     return 0;
 }
 
-struct image * gdal_load_image(char const * name)
+/* returns a newly malloced string describing the stretch */
+char *get_stretch_as_string(struct stretch *stretch)
+{
+char szMode[GDAL_ERROR_SIZE], *pszStr;
+char szStretchMode[GDAL_ERROR_SIZE];
+
+    szMode[0] = '\0';
+    if( stretch->mode == VIEWER_MODE_COLORTABLE )
+        snprintf(szMode, GDAL_ERROR_SIZE, "Color Table %d", stretch->bands[0]);
+    else if( stretch->mode == VIEWER_MODE_GREYSCALE )
+        snprintf(szMode, GDAL_ERROR_SIZE, "GreyScale %d", stretch->bands[0]);
+    else if( stretch->mode == VIEWER_MODE_RGB )
+        snprintf(szMode, GDAL_ERROR_SIZE, "RGB %d %d %d", stretch->bands[0],
+            stretch->bands[1], stretch->bands[2]);
+    else if( stretch->mode == VIEWER_MODE_PSEUDOCOLOR )
+        snprintf(szMode, GDAL_ERROR_SIZE, "PseudoColor %d", stretch->bands[0]);
+
+    szStretchMode[0] = '\0';
+    if( stretch->stretchmode == VIEWER_STRETCHMODE_NONE )
+        snprintf(szStretchMode, GDAL_ERROR_SIZE, " No Stretch");
+    else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
+        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Linear Stretch %.2f - %.2f", 
+            stretch->stretchparam[0], stretch->stretchparam[1]);
+    else if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV )
+        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Standard Deviation %.2f", stretch->stretchparam[0]);
+    else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST )
+        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Histogram Stretch %.2f - %.2f", 
+            stretch->stretchparam[0], stretch->stretchparam[1]);
+
+    pszStr = malloc(strlen(szMode) + strlen(szStretchMode) + 1);
+    strcpy(pszStr, szMode);
+    strcat(pszStr, szStretchMode);
+    return pszStr;
+}
+
+struct image * gdal_load_image(char const * name, struct stretchlist *stretchList)
 {
     struct image * im;
     GDALDatasetH ds;
+    struct stretch *stretch;
     int overviewIndex, nRasterCount;
+
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
 
@@ -895,6 +1349,22 @@ struct image * gdal_load_image(char const * name)
       snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not open %s with GDAL", name );
       return NULL;
     }
+
+    /* get the stretch */
+    stretch = get_stretch_for_gdal(stretchList, ds);
+    if( stretch == NULL )
+    {
+        free(im);
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not find stretch to use for %s", name);
+        return NULL;
+    }
+
+    /* status string */
+    if(pszStretchStatusString != NULL)
+    {
+        free(pszStretchStatusString);
+    }
+    pszStretchStatusString = get_stretch_as_string(stretch);
     
     /* Find the best overview level to use */
     overviewIndex = gdal_get_best_overview(ds);
@@ -907,19 +1377,9 @@ struct image * gdal_load_image(char const * name)
     }
    
     nRasterCount = GDALGetRasterCount(ds);
-    if( nRasterCount == 6 )
+    if( stretch->mode == VIEWER_MODE_RGB )
     {
-      if( gdal_read_multiband(ds,im,overviewIndex) == -1 )
-      {
-        /* trap error. Should have filled in message */
-        free(im);
-        GDALClose(ds);
-        return NULL;
-      }
-    }
-    else if( nRasterCount == 1 )
-    {
-      if( gdal_read_singleband(ds,im,overviewIndex) == -1 )
+      if( gdal_read_multiband(ds,im,overviewIndex, stretch) == -1 )
       {
         /* trap error. Should have filled in message */
         free(im);
@@ -929,12 +1389,14 @@ struct image * gdal_load_image(char const * name)
     }
     else
     {
-      free(im);
-      GDALClose(ds);
-      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to read %s. Only support 1 or 6 band images at the moment", name );
-      return NULL;
+      if( gdal_read_singleband(ds,im,overviewIndex, stretch) == -1 )
+      {
+        /* trap error. Should have filled in message */
+        free(im);
+        GDALClose(ds);
+        return NULL;
+      }
     }
-    
     
     GDALClose(ds);
 
@@ -948,4 +1410,11 @@ void gdal_unload_image(struct image * im)
     free(im);
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
+
+    /* status string */
+    if(pszStretchStatusString != NULL)
+    {
+        free(pszStretchStatusString);
+        pszStretchStatusString = NULL;
+    }
 }
