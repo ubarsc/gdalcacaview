@@ -1094,6 +1094,7 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
     }
 }
 
+/* stretches data to range 0-255 based on the current stretch */
 int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *stretch)
 {
     int n;
@@ -1207,6 +1208,7 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     if(!im->dither)
     {
         free(im->pixels);
+        free(pBuffer);
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to create dither" );
         return -1;
     }
@@ -1218,26 +1220,25 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
 
 int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch)
 {
-    /* Read a single band thematic image */
-    int depth = 1; /* 8 bit */
-    int count;
-    const char *pszThematic;
-    uint32_t red[256], green[256], blue[256], alpha[256];
-    GDALColorTableH cth;
+    /* Read a single band image */
+    int depth = 3;
+    int count, outcount, incount;
+    GDALRasterAttributeTableH rath;
+    float *pBuffer;
+    int *pRed = NULL, *pGreen = NULL, *pBlue = NULL;
+    GDALRATFieldUsage eUsage;
+    /* tell libcaca how we have encoded the bytes */
+    /* red, then green, then blue */    
+    int rmask = 0x0000ff;
+    int gmask = 0x00ff00;
+    int bmask = 0xff0000;
+    int amask = 0x000000;
     
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,stretch->bands[0]);
     GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
     im->w = GDALGetRasterBandXSize(ovh);
     im->h = GDALGetRasterBandYSize(ovh);
-    
-    /* Check we actually have thematic */
-    pszThematic = GDALGetMetadataItem(bandh,"LAYER_TYPE",NULL);
-    if( (pszThematic == NULL) || (strcmp( pszThematic, "thematic" ) != 0 ))
-    {
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Only support thematic single band images at the moment" );
-        return -1;
-    }
     
     im->pixels = malloc(im->w * im->h * depth);
     if(!im->pixels)
@@ -1248,47 +1249,113 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
 
     memset(im->pixels, 0, im->w * im->h * depth);
 
-    GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, im->pixels, im->w, im->h, GDT_Byte, depth, im->w );
-    
-    /*gdal_dump_image("outfile.txt",depth,im);*/
+    pBuffer = (float*)malloc(im->w * im->h * sizeof(float));
 
-    /* Set the palette */
-    memset(red,0,256 * sizeof(uint32_t));
-    memset(green,0,256 * sizeof(uint32_t));
-    memset(blue,0,256 * sizeof(uint32_t));
-    memset(alpha,0,256 * sizeof(uint32_t));
+    GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, pBuffer, im->w, im->h, GDT_Float32, sizeof(float), im->w*sizeof(float) );
+
+   if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
+   {
+      free(im->pixels);
+      free(pBuffer);
+      return -1;
+   }
     
-    cth = GDALGetRasterColorTable(bandh);
-    if( cth == NULL )
+    if( stretch->mode == VIEWER_MODE_COLORTABLE )
     {
-        free(im->pixels);
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to read colour table" );
-        return -1;
+        /* Need to grab the RAT and read the colour columns */
+        /* can't do the caca_set_dither_palette call since that is limited to 256 classes */
+        rath = GDALGetDefaultRAT(bandh);
+        if( rath == NULL )
+        {
+            free(im->pixels);
+            free(pBuffer);
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to Raster Attribute Table" );
+            return -1;
+        }
+
+        incount = GDALRATGetRowCount(rath);
+        for( count = 0; count < GDALRATGetColumnCount(rath); count++)
+        {
+            eUsage = GDALRATGetUsageOfCol(rath, count);
+            if( eUsage == GFU_Red )
+            {
+                pRed = (int*)CPLMalloc(incount * sizeof(int));
+                GDALRATValuesIOAsInteger(rath, GF_Read, count, 0, incount, pRed);
+            }
+            else if( eUsage == GFU_Green )
+            {
+                pGreen = (int*)CPLMalloc(incount * sizeof(int));
+                GDALRATValuesIOAsInteger(rath, GF_Read, count, 0, incount, pGreen);
+            }
+            else if( eUsage == GFU_Blue )
+            {
+                pBlue = (int*)CPLMalloc(incount * sizeof(int));
+                GDALRATValuesIOAsInteger(rath, GF_Read, count, 0, incount, pGreen);
+            }
+        }
+
+        /* Did we get all the columns? */
+        if( (pRed == NULL) || (pGreen == NULL) || (pBlue == NULL) )
+        {
+            free(im->pixels);
+            free(pBuffer);
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to find Red, Green and Blue columns" );
+            return -1;
+        }
+
+          /* look up the colours and put into our bil */
+          outcount = 0;
+          for(incount = 0; incount < (im->w * im->h); incount++ )
+          {
+             im->pixels[outcount] = pRed[(int)pBuffer[incount]];
+             outcount++;
+             im->pixels[outcount] = pGreen[(int)pBuffer[incount]];
+             outcount++;
+             im->pixels[outcount] = pBlue[(int)pBuffer[incount]];
+             outcount++;
+          }
+
+        free(pRed);
+        free(pGreen);
+        free(pBlue);
+
     }
-    
-    for( count = 0; count < GDALGetColorEntryCount(cth); count++)
+    else if( stretch->mode == VIEWER_MODE_GREYSCALE )
     {
-        const GDALColorEntry *colorentry = GDALGetColorEntry(cth,count);
-        /* libcaca expects values between 0 and 4095 */
-        /* GDAL gives us between 0 and 255 so we need to scale */
-        double dScale = 4095.0 / 255.0;
-        red[count] = ceil(colorentry->c1 * dScale);
-        green[count] = ceil(colorentry->c2 * dScale);
-        blue[count] = ceil(colorentry->c3 * dScale);
+      /* copy into our bil and repeat the colours */
+      outcount = 0;
+      for(incount = 0; incount < (im->w * im->h); incount++ )
+      {
+         im->pixels[outcount] = pBuffer[incount];
+         outcount++;
+         im->pixels[outcount] = pBuffer[incount];
+         outcount++;
+         im->pixels[outcount] = pBuffer[incount];
+         outcount++;
+      }
+
+    }
+    else
+    {
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unsupported stretch");
+        free(im->pixels);
+        free(pBuffer);
+        return -1;
     }
 
     /* Create the libcaca dither */
     im->dither = caca_create_dither(8*depth, im->w, im->h, depth * im->w,
-                                     0, 0, 0, 0);
+                                     rmask, gmask, bmask, amask);
     if(!im->dither)
     {
         free(im->pixels);
+        free(pBuffer);
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to create dither" );
         return -1;
     }
 
-    /* tell libcaca about the palette */
-    caca_set_dither_palette(im->dither, red, green, blue, alpha);
+
+    free(pBuffer);
     
     return 0;
 }
