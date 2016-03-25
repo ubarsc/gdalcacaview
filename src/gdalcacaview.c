@@ -380,7 +380,7 @@ int main(int argc, char **argv)
     if( pszHomeDir == NULL )
     {
         /* '.gcv' plus seperating slash plus terminating null */
-        pszConfigFile = malloc(strlen(pszHomeDir) + 6);
+        pszConfigFile = CPLMalloc(strlen(pszHomeDir) + 6);
         /* copy in the path */
         strcpy(pszConfigFile, pszHomeDir);
         
@@ -388,7 +388,7 @@ int main(int argc, char **argv)
     else
     {
         i = strlen(getenv("HOMEDRIVE")) + 1 + strlen(getenv("HOMEPATH")) + 6;
-        pszConfigFile = malloc(i);
+        pszConfigFile = CPLMalloc(i);
         strcpy(pszConfigFile, getenv("HOMEDRIVE"));
         strcat(pszConfigFile, "\\");
         strcat(pszConfigFile, getenv("HOMEPATH"));
@@ -409,7 +409,7 @@ int main(int argc, char **argv)
     }
 
     /* '.gcv' plus seperating slash plus terminating null */
-    pszConfigFile = malloc(strlen(pszHomeDir) + 6);
+    pszConfigFile = CPLMalloc(strlen(pszHomeDir) + 6);
     /* copy in the path */
     strcpy(pszConfigFile, pszHomeDir);
     /* slash and filename */
@@ -443,7 +443,7 @@ int main(int argc, char **argv)
                 {
                     /* new rule */
                     stretchList.num_stretches++;
-                    stretchList.stretches = (struct stretch*)realloc(stretchList.stretches, 
+                    stretchList.stretches = (struct stretch*)CPLRealloc(stretchList.stretches, 
                                     sizeof(struct stretch) * stretchList.num_stretches);
                     if( !stretch_from_string(&stretchList.stretches[stretchList.num_stretches-1], pszConfigSingleLine[1]) )
                     {
@@ -463,7 +463,7 @@ int main(int argc, char **argv)
         /*fprintf(stderr, "no config file %s\n", pszConfigFile);*/
     }
 
-    free(pszConfigFile);
+    CPLFree(pszConfigFile);
 
     /* if no rules were read in then use pszDefaultStretchRules */
     if( stretchList.num_stretches == 0 )
@@ -473,7 +473,7 @@ int main(int argc, char **argv)
         while(pszDefaultStretchRules[i] != NULL)
         {
             stretchList.num_stretches++;
-            stretchList.stretches = (struct stretch*)realloc(stretchList.stretches, 
+            stretchList.stretches = (struct stretch*)CPLRealloc(stretchList.stretches, 
                             sizeof(struct stretch) * stretchList.num_stretches);
             if( !stretch_from_string(&stretchList.stretches[stretchList.num_stretches-1], pszDefaultStretchRules[i]) )
             {
@@ -526,9 +526,9 @@ int main(int argc, char **argv)
         {
             /* add to our list of filenames */
             if(items)
-                list = realloc(list, (items + 1) * sizeof(char *));
+                list = CPLRealloc(list, (items + 1) * sizeof(char *));
             else
-                list = malloc(sizeof(char *));
+                list = CPLMalloc(sizeof(char *));
             list[items] = argv[i];
             items++;
 
@@ -563,7 +563,7 @@ int main(int argc, char **argv)
             return 1;
         }
         /* finished with it */
-        free(pszDriver);
+        CPLFree(pszDriver);
         pszDriver = NULL;
     }
     else
@@ -610,9 +610,9 @@ int main(int argc, char **argv)
 
         /* Add argv[i] to the list */
 /*        if(items)*/
-/*            list = realloc(list, (items + 1) * sizeof(char *));*/
+/*            list = CPLRealloc(list, (items + 1) * sizeof(char *));*/
 /*        else*/
-/*            list = malloc(sizeof(char *));*/
+/*            list = CPLMalloc(sizeof(char *));*/
 /*        list[items] = argv[i];*/
 /*        items++;*/
 
@@ -807,7 +807,7 @@ int main(int argc, char **argv)
             if(len < ww + 1)
                 len = ww + 1;
 
-            buffer = malloc(len);
+            buffer = CPLMalloc(len);
 
             sprintf(buffer, " Loading `%s'... ", list[current]);
             buffer[ww] = '\0';
@@ -828,7 +828,7 @@ int main(int argc, char **argv)
             set_zoom(0);
             set_gamma(0);
 
-            free(buffer);
+            CPLFree(buffer);
         }
 
         caca_set_color_ansi(cv, CACA_WHITE, CACA_BLACK);
@@ -861,13 +861,13 @@ int main(int argc, char **argv)
             if(len < ww + 1)
                 len = ww + 1;
 
-            buffer = malloc(len);
+            buffer = CPLMalloc(len);
 
             sprintf(buffer, error, list[current]);
             buffer[ww] = '\0';
             caca_set_color_ansi(cv, CACA_WHITE, CACA_BLUE);
             caca_put_str(cv, (ww - strlen(buffer)) / 2, wh / 2, buffer);
-            free(buffer);
+            CPLFree(buffer);
         }
         else
         {
@@ -927,7 +927,7 @@ int main(int argc, char **argv)
     if(im)
         gdal_unload_image(im);
     if(pszStretchStatusString)
-        free(pszStretchStatusString);
+        CPLFree(pszStretchStatusString);
     caca_free_display(dp);
     caca_free_canvas(cv);
 
@@ -1150,21 +1150,11 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     im->w = GDALGetRasterBandXSize(ovh);
     im->h = GDALGetRasterBandYSize(ovh);
     
-    im->pixels = malloc(im->w * im->h * depth);
-    if(!im->pixels)
-    {
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to allocate memory for %d x %d image", im->w, im->h );
-        return -1;
-    }
+    im->pixels = CPLMalloc(im->w * im->h * depth);
 
     memset(im->pixels, 0, im->w * im->h * depth);
     
-    pBuffer = (float*)malloc(im->w * im->h * sizeof(float));
-    if(!pBuffer)
-    {
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to allocate memory for %d x %d image", im->w, im->h );
-        return -1;
-    }
+    pBuffer = (float*)CPLMalloc(im->w * im->h * sizeof(float));
 
     /* read in our 3 bands */    
     for( count = 0; count < 3; count++ )
@@ -1181,8 +1171,8 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
 
       if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
       {
-          free(im->pixels);
-          free(pBuffer);
+          CPLFree(im->pixels);
+          CPLFree(pBuffer);
           return -1;
       }
 
@@ -1207,13 +1197,13 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
                                      rmask, gmask, bmask, amask);
     if(!im->dither)
     {
-        free(im->pixels);
-        free(pBuffer);
+        CPLFree(im->pixels);
+        CPLFree(pBuffer);
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to create dither" );
         return -1;
     }
 
-    free(pBuffer);
+    CPLFree(pBuffer);
     
     return 0;
 }
@@ -1240,23 +1230,18 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     im->w = GDALGetRasterBandXSize(ovh);
     im->h = GDALGetRasterBandYSize(ovh);
     
-    im->pixels = malloc(im->w * im->h * depth);
-    if(!im->pixels)
-    {
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to allocate memory for %d x %d image", im->w, im->h );
-        return -1;
-    }
+    im->pixels = CPLMalloc(im->w * im->h * depth);
 
     memset(im->pixels, 0, im->w * im->h * depth);
 
-    pBuffer = (float*)malloc(im->w * im->h * sizeof(float));
+    pBuffer = (float*)CPLMalloc(im->w * im->h * sizeof(float));
 
     GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, pBuffer, im->w, im->h, GDT_Float32, sizeof(float), im->w*sizeof(float) );
 
    if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
    {
-      free(im->pixels);
-      free(pBuffer);
+      CPLFree(im->pixels);
+      CPLFree(pBuffer);
       return -1;
    }
     
@@ -1267,8 +1252,8 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
         rath = GDALGetDefaultRAT(bandh);
         if( rath == NULL )
         {
-            free(im->pixels);
-            free(pBuffer);
+            CPLFree(im->pixels);
+            CPLFree(pBuffer);
             snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to Raster Attribute Table" );
             return -1;
         }
@@ -1297,8 +1282,8 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
         /* Did we get all the columns? */
         if( (pRed == NULL) || (pGreen == NULL) || (pBlue == NULL) )
         {
-            free(im->pixels);
-            free(pBuffer);
+            CPLFree(im->pixels);
+            CPLFree(pBuffer);
             snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to find Red, Green and Blue columns" );
             return -1;
         }
@@ -1315,9 +1300,9 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
              outcount++;
           }
 
-        free(pRed);
-        free(pGreen);
-        free(pBlue);
+        CPLFree(pRed);
+        CPLFree(pGreen);
+        CPLFree(pBlue);
 
     }
     else if( stretch->mode == VIEWER_MODE_GREYSCALE )
@@ -1338,8 +1323,8 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     else
     {
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unsupported stretch");
-        free(im->pixels);
-        free(pBuffer);
+        CPLFree(im->pixels);
+        CPLFree(pBuffer);
         return -1;
     }
 
@@ -1348,14 +1333,14 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
                                      rmask, gmask, bmask, amask);
     if(!im->dither)
     {
-        free(im->pixels);
-        free(pBuffer);
+        CPLFree(im->pixels);
+        CPLFree(pBuffer);
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to create dither" );
         return -1;
     }
 
 
-    free(pBuffer);
+    CPLFree(pBuffer);
     
     return 0;
 }
@@ -1389,7 +1374,7 @@ char szStretchMode[GDAL_ERROR_SIZE];
         snprintf(szStretchMode, GDAL_ERROR_SIZE, " Histogram Stretch %.2f - %.2f", 
             stretch->stretchparam[0], stretch->stretchparam[1]);
 
-    pszStr = malloc(strlen(szMode) + strlen(szStretchMode) + 1);
+    pszStr = CPLMalloc(strlen(szMode) + strlen(szStretchMode) + 1);
     strcpy(pszStr, szMode);
     strcat(pszStr, szStretchMode);
     return pszStr;
@@ -1406,13 +1391,13 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
     szGDALMessages[0] = '\0';
 
     /* create our image structure */
-    im = malloc(sizeof(struct image));
+    im = CPLMalloc(sizeof(struct image));
     
     /* attempt to open with GDAL */
     ds = GDALOpen(name,GA_ReadOnly);
     if( ds == NULL )
     {
-      free(im);
+      CPLFree(im);
       snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not open %s with GDAL", name );
       return NULL;
     }
@@ -1421,7 +1406,7 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
     stretch = get_stretch_for_gdal(stretchList, ds);
     if( stretch == NULL )
     {
-        free(im);
+        CPLFree(im);
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not find stretch to use for %s", name);
         return NULL;
     }
@@ -1429,7 +1414,7 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
     /* status string */
     if(pszStretchStatusString != NULL)
     {
-        free(pszStretchStatusString);
+        CPLFree(pszStretchStatusString);
     }
     pszStretchStatusString = get_stretch_as_string(stretch);
     
@@ -1437,7 +1422,7 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
     overviewIndex = gdal_get_best_overview(ds);
     if( overviewIndex == -1 )
     {
-      free(im);
+      CPLFree(im);
       GDALClose(ds);
       snprintf( szGDALMessages, GDAL_ERROR_SIZE, "%s has no overviews. Run gdalcalcstats -pyramid first", name );
       return NULL;
@@ -1449,7 +1434,7 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
       if( gdal_read_multiband(ds,im,overviewIndex, stretch) == -1 )
       {
         /* trap error. Should have filled in message */
-        free(im);
+        CPLFree(im);
         GDALClose(ds);
         return NULL;
       }
@@ -1459,7 +1444,7 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
       if( gdal_read_singleband(ds,im,overviewIndex, stretch) == -1 )
       {
         /* trap error. Should have filled in message */
-        free(im);
+        CPLFree(im);
         GDALClose(ds);
         return NULL;
       }
@@ -1472,16 +1457,16 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
 
 void gdal_unload_image(struct image * im)
 {
-    free(im->pixels);
+    CPLFree(im->pixels);
     caca_free_dither(im->dither);
-    free(im);
+    CPLFree(im);
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
 
     /* status string */
     if(pszStretchStatusString != NULL)
     {
-        free(pszStretchStatusString);
+        CPLFree(pszStretchStatusString);
         pszStretchStatusString = NULL;
     }
 }
