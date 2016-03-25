@@ -1,6 +1,6 @@
 /*
- *  cacaview      image viewer for libcaca
- *  Copyright (c) 2003-2006 Sam Hocevar <sam@hocevar.net>
+ *  gdalcacaview  GDAL image viewer for libcaca
+ *  Copyright (c) 2016 Sam Gillingham <gillingham.sam@gmail.com>
  *                All Rights Reserved
  *
  *  This program is free software. It comes without any warranty, to
@@ -10,17 +10,9 @@
  *  http://sam.zoy.org/wtfpl/COPYING for more details.
  */
 
-/*#include "config.h"*/
-
-#if !defined(__KERNEL__)
-#   include <stdio.h>
-#   include <string.h>
-#   include <stdlib.h>
-#endif
-
-#if defined(HAVE_SLEEP)
-#   include <windows.h>
-#endif
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
 #if !defined(_WIN32) || defined(__CYGWIN__) 
 #include <sys/types.h>
