@@ -46,12 +46,12 @@ caca_canvas_t *cv; caca_display_t *dp;
 char szGDALMessages[GDAL_ERROR_SIZE];
 
 /* Default stretch rules */
-char *pszDefaultStretchRules[] = {"equal,1,1,colortable,none,,1",
-"equal,1,-1,greyscale,none,,1",
-"equal,2,-1,greyscale,none,,1",
-"equal,3,-1,rgb,none,,1|2|3",
-"less,6,-1,rgb,stddev,2.0,4|3|2",
-"greater,5,-1,rgb,stddev,2.0,5|4|2", NULL};
+char *pszDefaultStretchRules[] = {"equal,1,1:colortable,none,,1",
+"equal,1,-1:greyscale,none,,1",
+"equal,2,-1:greyscale,none,,1",
+"equal,3,-1:rgb,none,,1|2|3",
+"less,6,-1:rgb,stddev,2.0,4|3|2",
+"greater,5,-1:rgb,stddev,2.0,5|4|2", NULL};
 
 
 /* stolen from common-image.h */
@@ -119,13 +119,12 @@ float xfactor = 1.0, yfactor = 1.0, dx = 0.5, dy = 0.5;
 int zoom = 0, g = 0, fullscreen = 0, mode, ww, wh;
 char *pszStretchStatusString = NULL;
 
-int stretch_from_string(struct stretch *newStretch, const char *pszString)
+/* Takes the rule part (left of :) and puts it into the stretch */
+int rulepart_from_string(struct stretch *newStretch, const char *pszString)
 {
 char **pszTokens;
-char **pszExtraTokens;
 char *pszTmp;
 int n = 0;
-int i;
 
     pszTokens = CSLTokenizeString2(pszString, ",", 
         CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
@@ -133,7 +132,7 @@ int i;
     pszTmp = pszTokens[n];
     if( pszTmp == NULL )
     {
-        fprintf(stderr, "Missing value in rule string\n");
+        fprintf(stderr, "Missing comparison in rule string\n");
         CSLDestroy(pszTokens);
         return 0;
     }
@@ -154,7 +153,7 @@ int i;
     pszTmp = pszTokens[n];
     if( pszTmp == NULL )
     {
-        fprintf(stderr, "Missing value in rule string\n");
+        fprintf(stderr, "Missing comparison value in rule string\n");
         CSLDestroy(pszTokens);
         return 0;
     }
@@ -164,13 +163,28 @@ int i;
     pszTmp = pszTokens[n];
     if( pszTmp == NULL )
     {
-        fprintf(stderr, "Missing value in rule string\n");
+        fprintf(stderr, "Missing color table band value in rule string\n");
         CSLDestroy(pszTokens);
         return 0;
     }
     newStretch->ctband = atol(pszTmp);
 
-    n++;
+    CSLDestroy(pszTokens);
+
+    return 1;
+}
+
+/* deals with the part to the right of the : */
+int stretchpart_from_string(struct stretch *newStretch, const char *pszString)
+{
+char **pszTokens;
+char **pszExtraTokens;
+char *pszTmp;
+int n = 0, i;
+
+    pszTokens = CSLTokenizeString2(pszString, ",", 
+        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
+
     pszTmp = pszTokens[n];
     if( pszTmp == NULL )
     {
@@ -186,7 +200,7 @@ int i;
         newStretch->mode = VIEWER_MODE_RGB;
     else
     {
-        fprintf(stderr, "Unable to understand mode %s\n", pszTmp);
+        fprintf(stderr, "Unable to understand stretch mode %s\n", pszTmp);
         CSLDestroy(pszTokens);
         return 0;
     }
@@ -255,6 +269,49 @@ int i;
     CSLDestroy(pszExtraTokens);
 
     CSLDestroy(pszTokens);
+
+    return 1;
+}
+
+int stretch_from_string(struct stretch *newStretch, const char *pszString)
+{
+char **pszRuleAndStretch;
+char *pszTmp;
+
+    /* First split into the 2 parts - rule and stretch */
+    pszRuleAndStretch = CSLTokenizeString2(pszString, ":",
+        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
+
+    pszTmp = pszRuleAndStretch[0];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing rule string\n");
+        CSLDestroy(pszRuleAndStretch);
+        return 0;
+    }
+
+    if( !rulepart_from_string(newStretch, pszTmp) )
+    {
+        CSLDestroy(pszRuleAndStretch);
+        return 0;
+    }
+
+    pszTmp = pszRuleAndStretch[1];
+    if( pszTmp == NULL )
+    {
+        fprintf(stderr, "Missing stretch string\n");
+        CSLDestroy(pszRuleAndStretch);
+        return 0;
+    }
+
+    if( !stretchpart_from_string(newStretch, pszTmp) )
+    {
+        CSLDestroy(pszRuleAndStretch);
+        return 0;
+    }
+
+    CSLDestroy(pszRuleAndStretch);
+
     return 1;
 }
 
