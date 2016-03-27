@@ -35,7 +35,7 @@ def doConversion():
         else:
             line += "," + str(rule.ctband)
 
-        line += "," + MODE_DICT[rule.stretch.mode]
+        line += ":" + MODE_DICT[rule.stretch.mode]
         
         line += "," + STRETCHMODE_DICT[rule.stretch.stretchmode]
 

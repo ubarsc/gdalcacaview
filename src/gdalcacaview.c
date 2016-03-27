@@ -107,7 +107,7 @@ static void set_zoom(int);
 static void set_gamma(int);
 static void draw_checkers(int, int, int, int);
 
-extern struct image * gdal_load_image(char const *, struct stretchlist *);
+extern struct image * gdal_load_image(char const *, struct stretchlist *, struct stretch*);
 extern void gdal_unload_image(struct image *);
 
 /* Local variables */
@@ -388,6 +388,7 @@ void printUsage()
     printf("where options is one of:\n"); 
     printf(" --printdrivers\tPrint list of available drivers and exit\n");
     printf(" --driver DRIVER\tUse the specified driver. If not given, uses default\n");
+    printf(" --stretch STRETCH\tUse the specified stretch string. If not given uses default stretch rules\n");
     printf("and filename(s) are GDAL supported datasets.\n");
 }
 
@@ -420,6 +421,7 @@ int main(int argc, char **argv)
     char *pszConfigFile = NULL, *pszHomeDir = NULL;
     char **pszConfigLines, **pszConfigSingleLine;
     struct stretchlist stretchList;
+    struct stretch *pCmdStretch = NULL; /* non-NULL when stretch is passed in on command line */
 
 /* -------------------------------------------------------------------- */
 /*      Read config file if it exists                                   */
@@ -553,7 +555,27 @@ int main(int argc, char **argv)
             }
             else
             {
-                printf("Must specify driver name\n");
+                fprintf(stderr, "Must specify driver name\n");
+                printUsage();
+                exit(1);
+            }
+        }
+        else if( strcmp( argv[i], "--stretch" ) == 0 )
+        {
+            if( i+1 < argc )
+            {
+                pCmdStretch = (struct stretch*)CPLCalloc(1, sizeof(struct stretch));
+                if( !stretchpart_from_string(pCmdStretch, argv[i+1]) )
+                {
+                    CPLFree(pCmdStretch);
+                    /* error already printed by stretchpart_from_string */
+                    exit(1);
+                }
+                i++;
+            }
+            else
+            {
+                fprintf(stderr, "Must specify stretch string\n");
                 printUsage();
                 exit(1);
             }
@@ -868,7 +890,7 @@ int main(int argc, char **argv)
 
             if(im)
                 gdal_unload_image(im);
-            im = gdal_load_image(list[current], &stretchList);
+            im = gdal_load_image(list[current], &stretchList, pCmdStretch);
             reload = 0;
 
             /* Reset image-specific runtime variables */
@@ -977,6 +999,8 @@ int main(int argc, char **argv)
         gdal_unload_image(im);
     if(pszStretchStatusString)
         CPLFree(pszStretchStatusString);
+    if(pCmdStretch)
+        CPLFree(pCmdStretch);
     caca_free_display(dp);
     caca_free_canvas(cv);
 
@@ -1429,7 +1453,8 @@ char szStretchMode[GDAL_ERROR_SIZE];
     return pszStr;
 }
 
-struct image * gdal_load_image(char const * name, struct stretchlist *stretchList)
+/* pCmdStretch non-NULL if they have passed in a stretch on the command line */
+struct image * gdal_load_image(char const * name, struct stretchlist *stretchList, struct stretch *pCmdStretch)
 {
     struct image * im;
     GDALDatasetH ds;
@@ -1452,12 +1477,17 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
     }
 
     /* get the stretch */
-    stretch = get_stretch_for_gdal(stretchList, ds);
-    if( stretch == NULL )
+    if( pCmdStretch != NULL )
+        stretch = pCmdStretch;
+    else
     {
-        CPLFree(im);
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not find stretch to use for %s", name);
-        return NULL;
+        stretch = get_stretch_for_gdal(stretchList, ds);
+        if( stretch == NULL )
+        {
+            CPLFree(im);
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not find stretch to use for %s", name);
+            return NULL;
+        }
     }
 
     /* status string */
