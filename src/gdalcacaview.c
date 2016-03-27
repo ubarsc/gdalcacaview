@@ -1171,8 +1171,20 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
 int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *stretch)
 {
     int n;
-    const char *pszStdDev, *pszMean;
-    double stddev, mean;
+    const char *pszStdDev, *pszMean, *pszMin, *pszMax;
+    double stddev, mean, dMin, dMax, dStep;
+
+        pszMin = GDALGetMetadataItem(bandh,"STATISTICS_MINIMUM",NULL);
+        pszMax = GDALGetMetadataItem(bandh,"STATISTICS_MAXIMUM",NULL);
+        if( (pszMin == NULL) || (pszMax == NULL))
+        {
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
+            return -1;
+        }
+
+        dMin = atof(pszMin);
+        dMax = atof(pszMax);
+
       /* Get the stats for the Band */
       if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV)
       {
@@ -1190,8 +1202,28 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
           /* now apply the standard deviation stretch */
           for( n = 0; n < size; n++)
           {
-            pBuffer[n] = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
+            if(pBuffer[n] <= dMin)
+                pBuffer[n] = 0;
+            else if(pBuffer[n] >= dMax)
+                pBuffer[n] = 255;
+            else
+                pBuffer[n] = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
           }
+      }
+      else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
+      {
+        dStep = (dMax - dMin) / 255.0;
+
+        /* linear stretch */
+        for( n = 0; n < size; n++)
+        {
+            if(pBuffer[n] <= dMin)
+                pBuffer[n] = 0;
+            else if(pBuffer[n] >= dMax)
+                pBuffer[n] = 255;
+            else
+                pBuffer[n] = (pBuffer[n] - dMin) * dStep;
+        }
       }
       else if( stretch->stretchmode != VIEWER_STRETCHMODE_NONE)
       {
