@@ -383,13 +383,13 @@ GDALRATFieldUsage usage;
 
 void printUsage()
 {
-    printf("gdalcacaview [options] filename1 [filename2...]\n\n");
+    printf("gdalcacaview [options] filename\n\n");
 
     printf("where options is one of:\n"); 
     printf(" --printdrivers\tPrint list of available drivers and exit\n");
     printf(" --driver DRIVER\tUse the specified driver. If not given, uses default\n");
     printf(" --stretch STRETCH\tUse the specified stretch string. If not given uses default stretch rules\n");
-    printf("and filename(s) are GDAL supported datasets.\n");
+    printf("and filename is a GDAL supported dataset.\n");
 }
 
 void printDrivers()
@@ -414,12 +414,11 @@ int main(int argc, char **argv)
     int quit = 0, update = 1, help = 0, status = 0;
     int reload = 0;
 
-    char **list = NULL;
-    int current = 0, items = 0, opts = 1;
     int i;
     char *pszDriver = NULL;
     char *pszConfigFile = NULL, *pszHomeDir = NULL;
     char **pszConfigLines, **pszConfigSingleLine;
+    char *pszFileName = NULL;
     struct stretchlist stretchList;
     struct stretch *pCmdStretch = NULL; /* non-NULL when stretch is passed in on command line */
 
@@ -588,26 +587,27 @@ int main(int argc, char **argv)
         }
         else if( argv[i][0] == '-' )
         {
-            printf( "Option %s incomplete, or not recognised.\n\n", 
+            fprintf(stderr, "Option %s incomplete, or not recognised.\n\n", 
                     argv[i] );
             printUsage();
             exit(1);
         }
         else
         {
-            /* add to our list of filenames */
-            if(items)
-                list = CPLRealloc(list, (items + 1) * sizeof(char *));
-            else
-                list = CPLMalloc(sizeof(char *));
-            list[items] = argv[i];
-            items++;
+            /* a filename */
+            if( pszFileName != NULL )
+            {
+                fprintf(stderr, "only one filename can be specified\n");
+                printUsage();
+                exit(1);
+            }
+            pszFileName = argv[i];
 
             reload = 1;
         }
     }
     
-    if( items == 0 )
+    if( pszFileName == NULL )
     {
         printf( "filename(s) not specified\n" );
         printUsage();
@@ -667,36 +667,12 @@ int main(int argc, char **argv)
     for(i = 0; i < GAMMA_MAX; i++)
         gammatab[i + 1] = gammatab[i] * GAMMA_FACTOR;
 
-    /* Load items into playlist */
-    
-    /*for(i = 1; i < argc; i++)*/
-/*    {*/
-        /* Skip options except after `--' */
-/*        if(opts && argv[i][0] == '-')*/
-/*        {*/
-/*            if(argv[i][1] == '-' && argv[i][2] == '\0')*/
-/*                opts = 0;*/
-/*            continue;*/
-/*        }*/
-
-        /* Add argv[i] to the list */
-/*        if(items)*/
-/*            list = CPLRealloc(list, (items + 1) * sizeof(char *));*/
-/*        else*/
-/*            list = CPLMalloc(sizeof(char *));*/
-/*        list[items] = argv[i];*/
-/*        items++;*/
-
-/*        reload = 1;*/
-/*    }*/
-
     /* Go ! */
     while(!quit)
     {
         caca_event_t ev;
         unsigned int const event_mask = CACA_EVENT_KEY_PRESS
                                       | CACA_EVENT_RESIZE
-                                      | CACA_EVENT_MOUSE_PRESS
                                       | CACA_EVENT_QUIT;
         unsigned int new_status = 0, new_help = 0;
         int event;
@@ -708,32 +684,9 @@ int main(int argc, char **argv)
 
         while(event)
         {
-            if(caca_get_event_type(&ev) & CACA_EVENT_MOUSE_PRESS)
-            {
-/*                if(caca_get_event_mouse_button(&ev) == 1)
-                {
-                    if(items) current = (current + 1) % items;
-                    reload = 1;
-                }
-                if(caca_get_event_mouse_button(&ev) == 2)
-                {
-                    if(items) current = (items + current - 1) % items;
-                    reload = 1;
-                }*/
-            }
-            else if(caca_get_event_type(&ev) & CACA_EVENT_KEY_PRESS)
+            if(caca_get_event_type(&ev) & CACA_EVENT_KEY_PRESS)
                 switch(caca_get_event_key_ch(&ev))
             {
-            case 'n':
-            case 'N':
-                if(items) current = (current + 1) % items;
-                reload = 1;
-                break;
-            case 'p':
-            case 'P':
-                if(items) current = (items + current - 1) % items;
-                reload = 1;
-                break;
             case 'f':
             case 'F':
             case CACA_KEY_F11:
@@ -870,17 +823,17 @@ int main(int argc, char **argv)
             event = caca_get_event(dp, CACA_EVENT_KEY_PRESS, &ev, 0);
         }
 
-        if(items && reload)
+        if(reload)
         {
             char *buffer;
-            int len = strlen(" Loading `%s'... ") + strlen(list[current]);
+            int len = strlen(" Loading `%s'... ") + strlen(pszFileName);
 
             if(len < ww + 1)
                 len = ww + 1;
 
             buffer = CPLMalloc(len);
 
-            sprintf(buffer, " Loading `%s'... ", list[current]);
+            sprintf(buffer, " Loading `%s'... ", pszFileName);
             buffer[ww] = '\0';
             caca_set_color_ansi(cv, CACA_WHITE, CACA_BLUE);
             caca_put_str(cv, (ww - strlen(buffer)) / 2, wh / 2, buffer);
@@ -890,7 +843,7 @@ int main(int argc, char **argv)
 
             if(im)
                 gdal_unload_image(im);
-            im = gdal_load_image(list[current], &stretchList, pCmdStretch);
+            im = gdal_load_image(pszFileName, &stretchList, pCmdStretch);
             reload = 0;
 
             /* Reset image-specific runtime variables */
@@ -905,12 +858,7 @@ int main(int argc, char **argv)
         caca_set_color_ansi(cv, CACA_WHITE, CACA_BLACK);
         caca_clear_canvas(cv);
 
-        if(!items)
-        {
-            caca_set_color_ansi(cv, CACA_WHITE, CACA_BLUE);
-            caca_printf(cv, ww / 2 - 5, wh / 2, " No image. ");
-        }
-        else if(!im)
+        if(!im)
         {
 #if defined(USE_IMLIB2)
 #   define ERROR_STRING " Error loading `%s'. "
@@ -919,7 +867,7 @@ int main(int argc, char **argv)
 #endif
             char *buffer;
             char *error = ERROR_STRING;
-            int len = strlen(ERROR_STRING) + strlen(list[current]);
+            int len = strlen(ERROR_STRING) + strlen(pszFileName);
             
             if( strlen( szGDALMessages ) != 0 )
             {
@@ -934,7 +882,7 @@ int main(int argc, char **argv)
 
             buffer = CPLMalloc(len);
 
-            sprintf(buffer, error, list[current]);
+            sprintf(buffer, error, pszFileName);
             buffer[ww] = '\0';
             caca_set_color_ansi(cv, CACA_WHITE, CACA_BLUE);
             caca_put_str(cv, (ww - strlen(buffer)) / 2, wh / 2, buffer);
