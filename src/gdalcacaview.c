@@ -1170,9 +1170,11 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
 /* stretches data to range 0-255 based on the current stretch */
 int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *stretch)
 {
-    int n;
+    int n, nbins, *pHisto = NULL;
     const char *pszStdDev, *pszMean, *pszMin, *pszMax;
     double stddev, mean, dMin, dMax, dStep;
+    double dSumHisto, dSumVals, dBandLower, dBandUpper, dStretchMin, dStretchMax;
+    GDALRasterAttributeTableH rath;
 
         pszMin = GDALGetMetadataItem(bandh,"STATISTICS_MINIMUM",NULL);
         pszMax = GDALGetMetadataItem(bandh,"STATISTICS_MAXIMUM",NULL);
@@ -1209,6 +1211,77 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
             else
                 pBuffer[n] = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
           }
+      }
+      else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST)
+      {
+        /* Read the histogram */
+        rath = GDALGetDefaultRAT(bandh);
+        if(rath == NULL)
+        {
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Histogram not available. Run gdalcalcstats first" );
+            return -1;
+        }
+
+        nbins = GDALRATGetRowCount(rath);
+        for( n = 0; n < GDALRATGetColumnCount(rath); n++)
+        {
+            if( GDALRATGetUsageOfCol(rath, n) == GFU_PixelCount)
+            {
+                pHisto = (int*)CPLMalloc(nbins * sizeof(int));
+                GDALRATValuesIOAsInteger(rath, GF_Read, n, 0, nbins, pHisto);
+            }
+        }
+        
+        if(pHisto == NULL)
+        {
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Histogram not available. Run gdalcalcstats first" );
+            return -1;
+        }
+
+        dSumHisto = 0;
+        for( n = 0; n < nbins; n++)
+            dSumHisto += pHisto[n];
+        
+        dBandLower = dSumHisto * stretch->stretchparam[0];
+        dBandUpper = dSumHisto * stretch->stretchparam[1];
+
+        dStretchMin = dMin;
+        dStretchMax = dMax;
+        dSumVals = 0;
+        for( n = 0; n < nbins; n++ )
+        {
+            dSumVals += pHisto[n];
+            if( dSumVals > dBandLower )
+            {
+                dStretchMin = dMin + ((dMax - dMin) * (n / nbins));
+                break;
+            }
+        }
+
+        dSumVals = 0;
+        for( n = nbins; n >= 0; n-- )
+        {
+            dSumVals += pHisto[n];
+            if( dSumVals > dBandUpper )
+            {
+                dStretchMax = dMax + ((nbins - n - 1) / nbins);
+                break;
+            }
+        }
+
+        CPLFree(pHisto);
+
+        dStep = (dStretchMax - dStretchMin) / 255.0;
+        for( n = 0; n < size; n++)
+        {
+            if(pBuffer[n] <= dStretchMin)
+                pBuffer[n] = 0;
+            else if(pBuffer[n] >= dStretchMax)
+                pBuffer[n] = 255;
+            else
+                pBuffer[n] = (pBuffer[n] - dStretchMin) * dStep;
+        }
+
       }
       else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
       {
