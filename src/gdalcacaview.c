@@ -100,6 +100,19 @@ struct stretchlist
     struct stretch* stretches;
 };
 
+struct extent
+{
+    double dXMin, dXMax, dYMin, dYMax;
+};
+
+struct gdalFile
+{
+    GDALDatasetH ds;
+    struct extent fullExtent;
+    struct stretch *stretch;
+    double adfTransform[6];
+};
+
 /* Local functions */
 static void print_status(void);
 static void print_help(int, int);
@@ -107,7 +120,9 @@ static void set_zoom(int);
 static void set_gamma(int);
 static void draw_checkers(int, int, int, int);
 
-extern struct image * gdal_load_image(char const *, struct stretchlist *, struct stretch*);
+int gdal_open_file(char const *, struct gdalFile*, struct stretchlist *, struct stretch*);
+void gdal_close_file(struct gdalFile*);
+extern struct image * gdal_load_image(struct gdalFile*, struct extent *);
 extern void gdal_unload_image(struct image *);
 
 /* Local variables */
@@ -421,6 +436,11 @@ int main(int argc, char **argv)
     char *pszFileName = NULL;
     struct stretchlist stretchList;
     struct stretch *pCmdStretch = NULL; /* non-NULL when stretch is passed in on command line */
+    struct extent dispExtent;
+    struct gdalFile gdalfile;
+
+    memset(&dispExtent, 0, sizeof(dispExtent));
+    memset(&gdalfile, 0, sizeof(gdalfile));
 
 /* -------------------------------------------------------------------- */
 /*      Read config file if it exists                                   */
@@ -841,9 +861,21 @@ int main(int argc, char **argv)
             ww = caca_get_canvas_width(cv);
             wh = caca_get_canvas_height(cv);
 
+            if(gdalfile.ds)
+            {
+                gdal_close_file(&gdalfile);
+            }
             if(im)
+            {
                 gdal_unload_image(im);
-            im = gdal_load_image(pszFileName, &stretchList, pCmdStretch);
+                im = NULL;
+            }
+
+            if( gdal_open_file(pszFileName, &gdalfile, &stretchList, pCmdStretch) )
+            {
+                im = gdal_load_image(&gdalfile, &gdalfile.fullExtent);
+            }
+
             reload = 0;
 
             /* Reset image-specific runtime variables */
@@ -860,14 +892,9 @@ int main(int argc, char **argv)
 
         if(!im)
         {
-#if defined(USE_IMLIB2)
-#   define ERROR_STRING " Error loading `%s'. "
-#else
-#   define ERROR_STRING " Error loading `%s'. "
-#endif
             char *buffer;
-            char *error = ERROR_STRING;
-            int len = strlen(ERROR_STRING) + strlen(pszFileName);
+            char *error = " Error loading `%s'. ";
+            int len = strlen(error) + strlen(pszFileName);
             
             if( strlen( szGDALMessages ) != 0 )
             {
@@ -945,6 +972,8 @@ int main(int argc, char **argv)
     /* Clean up */
     if(im)
         gdal_unload_image(im);
+    if(gdalfile.ds)
+        gdal_close_file(&gdalfile);
     if(pszStretchStatusString)
         CPLFree(pszStretchStatusString);
     if(pCmdStretch)
@@ -960,10 +989,9 @@ static void print_status(void)
     caca_set_color_ansi(cv, CACA_WHITE, CACA_BLUE);
     caca_draw_line(cv, 0, 0, ww - 1, 0, ' ');
     caca_draw_line(cv, 0, wh - 2, ww - 1, wh - 2, '-');
-    caca_put_str(cv, 0, 0, "q:Quit  np:Next/Prev  +-x:Zoom  gG:Gamma  "
+    caca_put_str(cv, 0, 0, "q:Quit +-x:Zoom  gG:Gamma  "
                             "hjkl:Move  d:Dither  a:Antialias");
     caca_put_str(cv, ww - strlen("?:Help"), 0, "?:Help");
-/*    caca_printf(cv, 3, wh - 2, "cacaview %s", PACKAGE_VERSION);*/
     caca_printf(cv, ww - 30, wh - 2, "(gamma: %#.3g)", GAMMA(g));
     caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);
 
@@ -1116,12 +1144,14 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
 }
 
 /* stretches data to range 0-255 based on the current stretch */
+/* TODO: cache this information between stretches */
 int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *stretch)
 {
     int n, nbins, *pHisto = NULL;
     const char *pszStdDev, *pszMean, *pszMin, *pszMax;
     double stddev, mean, dMin, dMax, dStep;
     double dSumHisto, dSumVals, dBandLower, dBandUpper, dStretchMin, dStretchMax;
+    float dVal;
     GDALRasterAttributeTableH rath;
 
         pszMin = GDALGetMetadataItem(bandh,"STATISTICS_MINIMUM",NULL);
@@ -1152,12 +1182,20 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
           /* now apply the standard deviation stretch */
           for( n = 0; n < size; n++)
           {
-            if(pBuffer[n] <= dMin)
+            if((pBuffer[n] <= dMin) || (pBuffer[n] == 0))
                 pBuffer[n] = 0;
             else if(pBuffer[n] >= dMax)
                 pBuffer[n] = 255;
             else
-                pBuffer[n] = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
+            {
+                dVal = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
+                if( dVal < 0 )
+                    pBuffer[n] = 0;
+                else if( dVal > 255 )
+                    pBuffer[n] = 255;
+                else
+                    pBuffer[n] = dVal;
+            }
           }
       }
       else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST)
@@ -1227,7 +1265,15 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
             else if(pBuffer[n] >= dStretchMax)
                 pBuffer[n] = 255;
             else
-                pBuffer[n] = (pBuffer[n] - dStretchMin) * dStep;
+            {
+                dVal = (pBuffer[n] - dStretchMin) * dStep;
+                if( dVal < 0 )
+                    pBuffer[n] = 0;
+                else if( dVal > 255 )
+                    pBuffer[n] = 255;
+                else
+                    pBuffer[n] = dVal;
+            }
         }
 
       }
@@ -1243,7 +1289,15 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
             else if(pBuffer[n] >= dMax)
                 pBuffer[n] = 255;
             else
-                pBuffer[n] = (pBuffer[n] - dMin) * dStep;
+            {
+                dVal = (pBuffer[n] - dMin) * dStep;
+                if( dVal < 0 )
+                    pBuffer[n] = 0;
+                else if( dVal > 255 )
+                    pBuffer[n] = 255;
+                else
+                    pBuffer[n] = dVal;
+            }
         }
       }
       else if( stretch->stretchmode != VIEWER_STRETCHMODE_NONE)
@@ -1507,39 +1561,36 @@ char szStretchMode[GDAL_ERROR_SIZE];
 }
 
 /* pCmdStretch non-NULL if they have passed in a stretch on the command line */
-struct image * gdal_load_image(char const * name, struct stretchlist *stretchList, struct stretch *pCmdStretch)
+int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlist *stretchList, 
+                    struct stretch *pCmdStretch)
 {
-    struct image * im;
-    GDALDatasetH ds;
-    struct stretch *stretch;
-    int overviewIndex, nRasterCount;
+    int xsize, ysize;
 
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
 
-    /* create our image structure */
-    im = CPLMalloc(sizeof(struct image));
-    
     /* attempt to open with GDAL */
-    ds = GDALOpen(name,GA_ReadOnly);
-    if( ds == NULL )
+    file->ds = GDALOpen(pszFile, GA_ReadOnly);
+    if( file->ds == NULL )
     {
       CPLFree(im);
-      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not open %s with GDAL", name );
-      return NULL;
+      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not open %s with GDAL", pszFile );
+      return 0;
     }
 
     /* get the stretch */
     if( pCmdStretch != NULL )
-        stretch = pCmdStretch;
+    {
+        file->stretch = pCmdStretch;
+    }
     else
     {
-        stretch = get_stretch_for_gdal(stretchList, ds);
-        if( stretch == NULL )
+        file->stretch = get_stretch_for_gdal(stretchList, file->ds);
+        if( file->stretch == NULL )
         {
-            CPLFree(im);
-            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not find stretch to use for %s", name);
-            return NULL;
+            gdal_close_file(file);
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not find stretch to use for %s", pszFile);
+            return 0;
         }
     }
 
@@ -1548,42 +1599,75 @@ struct image * gdal_load_image(char const * name, struct stretchlist *stretchLis
     {
         CPLFree(pszStretchStatusString);
     }
-    pszStretchStatusString = get_stretch_as_string(stretch);
+    pszStretchStatusString = get_stretch_as_string(file->stretch);
+
+    /* get full extent */
+    if( GDALGetGeoTransform(file->ds, file->adfTransform) != CE_None )
+    {
+        gdal_close_file(file);
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "No Geo Transform");
+        return 0;
+    }
+
+    xsize = GDALGetRasterXSize(file->ds);
+    ysize = GDALGetRasterYSize(file->ds);
+
+    file->fullExtent.dXMin = file->adfTransform[0];
+    file->fullExtent.dYMax = file->adfTransform[3];
+    file->fullExtent.dXMax = file->adfTransform[0] + file->adfTransform[1] * xsize;
+    file->fullExtent.dYMin = file->adfTransform[3] + file->adfTransform[5] * ysize;
+
+    return 1;
+}
+
+void gdal_close_file(struct gdalFile* file)
+{
+    GDALClose(file->ds);
+    file->ds = NULL;
+}
+
+extern struct image * gdal_load_image(struct gdalFile *file, struct extent *extent)
+{
+    struct image * im;
+    int overviewIndex;
+
+    /* reset error message buffer */
+    szGDALMessages[0] = '\0';
+
+    /* create our image structure */
+    im = CPLMalloc(sizeof(struct image));
     
     /* Find the best overview level to use */
-    overviewIndex = gdal_get_best_overview(ds);
+    overviewIndex = gdal_get_best_overview(file->ds);
     if( overviewIndex == -1 )
     {
       CPLFree(im);
-      GDALClose(ds);
-      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "%s has no overviews. Run gdalcalcstats -pyramid first", name );
+      gdal_close_file(file);
+      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "%s has no overviews. Run gdalcalcstats -pyramid first", GDALGetDescription(file->ds) );
       return NULL;
     }
    
-    nRasterCount = GDALGetRasterCount(ds);
-    if( stretch->mode == VIEWER_MODE_RGB )
+    if( file->stretch->mode == VIEWER_MODE_RGB )
     {
-      if( gdal_read_multiband(ds,im,overviewIndex, stretch) == -1 )
+      if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch) == -1 )
       {
         /* trap error. Should have filled in message */
         CPLFree(im);
-        GDALClose(ds);
+        gdal_close_file(file);
         return NULL;
       }
     }
     else
     {
-      if( gdal_read_singleband(ds,im,overviewIndex, stretch) == -1 )
+      if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch) == -1 )
       {
         /* trap error. Should have filled in message */
         CPLFree(im);
-        GDALClose(ds);
+        gdal_close_file(file);
         return NULL;
       }
     }
     
-    GDALClose(ds);
-
     return im;
 }
 
