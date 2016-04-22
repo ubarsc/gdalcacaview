@@ -24,19 +24,16 @@
 #include "cpl_string.h"
 
 /* Local macros */
-#define MODE_IMAGE 1
-#define MODE_FILES 2
-
 #define STATUS_DITHERING 1
 #define STATUS_ANTIALIASING 2
 #define STATUS_BACKGROUND 3
 
-#define ZOOM_FACTOR 1.08f
-#define ZOOM_MAX 70
+#define ZOOM_IN_FACTOR 0.9
+#define ZOOM_OUT_FACTOR 1.1
+#define PAN_STEP 0.2
 #define GAMMA_FACTOR 1.04f
 #define GAMMA_MAX 100
 #define GAMMA(g) (((g) < 0) ? 1.0 / gammatab[-(g)] : gammatab[(g)])
-#define PAD_STEP 0.15
 
 /* libcaca/libcaca contexts */
 caca_canvas_t *cv; caca_display_t *dp;
@@ -102,7 +99,7 @@ struct stretchlist
 
 struct extent
 {
-    double dXMin, dXMax, dYMin, dYMax;
+    double dCentreX, dCentreY, dMetersPerCell;
 };
 
 struct gdalFile
@@ -116,7 +113,6 @@ struct gdalFile
 /* Local functions */
 static void print_status(void);
 static void print_help(int, int);
-static void set_zoom(int);
 static void set_gamma(int);
 static void draw_checkers(int, int, int, int);
 
@@ -128,10 +124,8 @@ extern void gdal_unload_image(struct image *);
 /* Local variables */
 struct image *im = NULL;
 
-float zoomtab[ZOOM_MAX + 1];
 float gammatab[GAMMA_MAX + 1];
-float xfactor = 1.0, yfactor = 1.0, dx = 0.5, dy = 0.5;
-int zoom = 0, g = 0, fullscreen = 0, mode, ww, wh;
+int g = 0, mode, ww, wh;
 char *pszStretchStatusString = NULL;
 
 /* Takes the rule part (left of :) and puts it into the stretch */
@@ -427,7 +421,7 @@ int main(int argc, char **argv)
     int dither_algorithm = 0;
 
     int quit = 0, update = 1, help = 0, status = 0;
-    int reload = 0;
+    int reload = 0, rezoom = 0;
 
     int i;
     char *pszDriver = NULL;
@@ -634,8 +628,6 @@ int main(int argc, char **argv)
         exit(1);
     }
     
-    /*printf( "driver = %s\n", pszDriver);*/
-
     /* Initialise libcaca */
     cv = caca_create_canvas(0, 0);
     if(!cv)
@@ -677,11 +669,6 @@ int main(int argc, char **argv)
     ww = caca_get_canvas_width(cv);
     wh = caca_get_canvas_height(cv);
 
-    /* Fill the zoom table */
-    zoomtab[0] = 1.0;
-    for(i = 0; i < ZOOM_MAX; i++)
-        zoomtab[i + 1] = zoomtab[i] * ZOOM_FACTOR;
-
     /* Fill the gamma table */
     gammatab[0] = 1.0;
     for(i = 0; i < GAMMA_MAX; i++)
@@ -705,15 +692,10 @@ int main(int argc, char **argv)
         while(event)
         {
             if(caca_get_event_type(&ev) & CACA_EVENT_KEY_PRESS)
-                switch(caca_get_event_key_ch(&ev))
             {
-            case 'f':
-            case 'F':
-            case CACA_KEY_F11:
-                fullscreen = ~fullscreen;
-                update = 1;
-                set_zoom(zoom);
-                break;
+                int ch = caca_get_event_key_ch(&ev);
+                switch(ch)
+            {
 #if 0 /* FIXME */
             case 'b':
                 i = 1 + caca_get_feature(cv, CACA_BACKGROUND);
@@ -764,12 +746,20 @@ int main(int argc, char **argv)
                 update = 1;
                 break;
             case '+':
-                update = 1;
-                set_zoom(zoom + 1);
+                if(!rezoom)
+                {
+                    dispExtent.dMetersPerCell *= ZOOM_IN_FACTOR;
+                    update = 1;
+                    rezoom = 1;
+                }
                 break;
             case '-':
-                update = 1;
-                set_zoom(zoom - 1);
+                if(!rezoom)
+                {
+                    dispExtent.dMetersPerCell *= ZOOM_OUT_FACTOR;
+                    update = 1;
+                    rezoom = 1;
+                }
                 break;
             case 'G':
                 update = 1;
@@ -781,37 +771,55 @@ int main(int argc, char **argv)
                 break;
             case 'x':
             case 'X':
-                update = 1;
-                set_zoom(0);
-                set_gamma(0);
+                if(!rezoom)
+                {
+                    update = 1;
+                    dispExtent.dCentreX = gdalfile.fullExtent.dCentreX;
+                    dispExtent.dCentreY = gdalfile.fullExtent.dCentreY;
+                    dispExtent.dMetersPerCell = gdalfile.fullExtent.dMetersPerCell;
+                    rezoom = 1;
+                    set_gamma(0);
+                }
                 break;
             case 'k':
             case 'K':
             case CACA_KEY_UP:
-                if(yfactor > 1.0) dy -= PAD_STEP / yfactor;
-                if(dy < 0.0) dy = 0.0;
-                update = 1;
+                if(!rezoom)
+                {
+                    dispExtent.dCentreY += ((wh * PAN_STEP) * dispExtent.dMetersPerCell);
+                    rezoom = 1;
+                    update = 1;
+                }
                 break;
             case 'j':
             case 'J':
             case CACA_KEY_DOWN:
-                if(yfactor > 1.0) dy += PAD_STEP / yfactor;
-                if(dy > 1.0) dy = 1.0;
-                update = 1;
+                if(!rezoom)
+                {
+                    dispExtent.dCentreY -= ((wh * PAN_STEP) * dispExtent.dMetersPerCell);
+                    rezoom = 1;
+                    update = 1;
+                }
                 break;
             case 'h':
             case 'H':
             case CACA_KEY_LEFT:
-                if(xfactor > 1.0) dx -= PAD_STEP / xfactor;
-                if(dx < 0.0) dx = 0.0;
-                update = 1;
+                if(!rezoom)
+                {
+                    dispExtent.dCentreX -= ((ww * PAN_STEP) * dispExtent.dMetersPerCell);
+                    rezoom = 1;
+                    update = 1;
+                }
                 break;
             case 'l':
             case 'L':
             case CACA_KEY_RIGHT:
-                if(xfactor > 1.0) dx += PAD_STEP / xfactor;
-                if(dx > 1.0) dx = 1.0;
-                update = 1;
+                if(!rezoom)
+                {
+                    dispExtent.dCentreX += ((ww * PAN_STEP) * dispExtent.dMetersPerCell);
+                    rezoom = 1;
+                    update = 1;
+                }
                 break;
             case '?':
                 new_help = !help;
@@ -823,13 +831,14 @@ int main(int argc, char **argv)
                 quit = 1;
                 break;
             }
+            }
             else if(caca_get_event_type(&ev) == CACA_EVENT_RESIZE)
             {
                 caca_refresh_display(dp);
                 ww = caca_get_event_resize_width(&ev);
                 wh = caca_get_event_resize_height(&ev);
                 update = 1;
-                set_zoom(zoom);
+                rezoom = 1;
             }
             else if(caca_get_event_type(&ev) & CACA_EVENT_QUIT)
                 quit = 1;
@@ -873,18 +882,33 @@ int main(int argc, char **argv)
 
             if( gdal_open_file(pszFileName, &gdalfile, &stretchList, pCmdStretch) )
             {
-                im = gdal_load_image(&gdalfile, &gdalfile.fullExtent);
+                dispExtent.dCentreX = gdalfile.fullExtent.dCentreX;
+                dispExtent.dCentreY = gdalfile.fullExtent.dCentreY;
+                dispExtent.dMetersPerCell = gdalfile.fullExtent.dMetersPerCell;
+                im = gdal_load_image(&gdalfile, &dispExtent);
             }
 
             reload = 0;
+            rezoom = 0;
 
             /* Reset image-specific runtime variables */
-            dx = dy = 0.5;
             update = 1;
-            set_zoom(0);
             set_gamma(0);
 
             CPLFree(buffer);
+        }
+
+        if(rezoom)
+        {
+            if(im)
+            {
+                gdal_unload_image(im);
+                im = NULL;
+            }
+
+            im = gdal_load_image(&gdalfile, &dispExtent);
+
+            rezoom = 0;
         }
 
         caca_set_color_ansi(cv, CACA_WHITE, CACA_BLACK);
@@ -917,47 +941,28 @@ int main(int argc, char **argv)
         }
         else
         {
-            float xdelta, ydelta;
-            int y, height;
-
-            y = fullscreen ? 0 : 1;
-            height = fullscreen ? wh : wh - 3;
-
-            xdelta = (xfactor > 1.0) ? dx : 0.5;
-            ydelta = (yfactor > 1.0) ? dy : 0.5;
-
-            draw_checkers(ww * (1.0 - xfactor) / 2,
-                          y + height * (1.0 - yfactor) / 2,
-                          ww * xfactor, height * yfactor);
-
-            caca_dither_bitmap(cv, ww * (1.0 - xfactor) * xdelta,
-                            y + height * (1.0 - yfactor) * ydelta,
-                            ww * xfactor + 1, height * yfactor + 1,
-                            im->dither, im->pixels);
+            caca_dither_bitmap(cv, 0, 1, ww, wh - 3, im->dither, im->pixels);
         }
 
-        if(!fullscreen)
-        {
-            print_status();
+        print_status();
 
-            caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_BLACK);
-            switch(status)
-            {
-                case STATUS_DITHERING:
-                    caca_printf(cv, 0, wh - 1, "Dithering: %s",
-                                 caca_get_dither_algorithm(im->dither));
-                    break;
+        caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_BLACK);
+        switch(status)
+        {
+            case STATUS_DITHERING:
+                caca_printf(cv, 0, wh - 1, "Dithering: %s",
+                             caca_get_dither_algorithm(im->dither));
+                break;
 #if 0 /* FIXME */
-                case STATUS_ANTIALIASING:
-                    caca_printf(cv, 0, wh - 1, "Antialiasing: %s",
-                  caca_get_feature_name(caca_get_feature(cv, CACA_ANTIALIASING)));
-                    break;
-                case STATUS_BACKGROUND:
-                    caca_printf(cv, 0, wh - 1, "Background: %s",
-                  caca_get_feature_name(caca_get_feature(cv, CACA_BACKGROUND)));
-                    break;
+            case STATUS_ANTIALIASING:
+                caca_printf(cv, 0, wh - 1, "Antialiasing: %s",
+              caca_get_feature_name(caca_get_feature(cv, CACA_ANTIALIASING)));
+                break;
+            case STATUS_BACKGROUND:
+                caca_printf(cv, 0, wh - 1, "Background: %s",
+              caca_get_feature_name(caca_get_feature(cv, CACA_BACKGROUND)));
+                break;
 #endif
-            }
         }
 
         if(help)
@@ -993,7 +998,7 @@ static void print_status(void)
                             "hjkl:Move  d:Dither  a:Antialias");
     caca_put_str(cv, ww - strlen("?:Help"), 0, "?:Help");
     caca_printf(cv, ww - 30, wh - 2, "(gamma: %#.3g)", GAMMA(g));
-    caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);
+/*    caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);*/
 
     if( pszStretchStatusString != NULL )
     {
@@ -1034,34 +1039,6 @@ static void print_help(int x, int y)
         caca_put_str(cv, x, y + i, help[i]);
 }
 
-static void set_zoom(int new_zoom)
-{
-    int height;
-
-    if(!im)
-        return;
-
-    zoom = new_zoom;
-
-    if(zoom > ZOOM_MAX) zoom = ZOOM_MAX;
-    if(zoom < -ZOOM_MAX) zoom = -ZOOM_MAX;
-
-    ww = caca_get_canvas_width(cv);
-    height = fullscreen ? wh : wh - 3;
-
-    xfactor = (zoom < 0) ? 1.0 / zoomtab[-zoom] : zoomtab[zoom];
-    yfactor = xfactor * ww / height * im->h / im->w
-               * caca_get_canvas_height(cv) / caca_get_canvas_width(cv)
-               * caca_get_display_width(dp) / caca_get_display_height(dp);
-
-    if(yfactor > xfactor)
-    {
-        float tmp = xfactor;
-        xfactor = tmp * tmp / yfactor;
-        yfactor = tmp;
-    }
-}
-
 static void set_gamma(int new_gamma)
 {
     if(!im)
@@ -1095,8 +1072,6 @@ static void draw_checkers(int x, int y, int w, int h)
         caca_put_char(cv, xn, yn, ' ');
     }
 }
-
-/* OK dodgy code below added by gillins */
 
 #define MAX_OVERVIEW_SIZE 3000
 
@@ -1309,7 +1284,105 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
     return 1;
 }
 
-int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch)
+#define PIX_PER_CELL 30
+
+/* Info for passing to GDALRasterIO */
+struct readInfo
+{
+    int nXOff, nYOff, nXSize, nYSize;
+    int nDataOffset;
+    int nBufXSize, nBufYSize;
+};
+
+int prepare_for_reading(int dataWidth, int dataHeight, GDALDatasetH ds, GDALRasterBandH ovh, struct extent *extent,
+            struct readInfo *info)
+{
+    double adfTransform[6], adfInvertTransform[6], x1, y1, x2, y2;
+    int tlx, tly, brx, bry, width, height, nFactor;
+    double dTLX, dTLY, dBRX, dBRY;
+    int leftExtra, rightExtra, topExtra, bottomExtra;
+    int widthIn, heightIn, origWidthIn, origHeightIn;
+
+    width = GDALGetRasterBandXSize(ovh);
+    height = GDALGetRasterBandYSize(ovh);
+    nFactor = GDALGetRasterXSize(ds) / width;
+
+    dTLX = extent->dCentreX - ((ww / 2.0) * extent->dMetersPerCell);
+    dBRX = extent->dCentreX + ((ww / 2.0) * extent->dMetersPerCell);
+    dTLY = extent->dCentreY + ((wh / 2.0) * extent->dMetersPerCell);
+    dBRY = extent->dCentreY - ((wh / 2.0) * extent->dMetersPerCell);
+
+    /* work out where we are from extent */
+    if( GDALGetGeoTransform(ds, adfTransform) != CE_None )
+    {
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Image has no geotransform" );
+        return 0;
+    }
+
+    /* Adjust pixel size for overview */
+    adfTransform[1] *= nFactor;
+    adfTransform[5] *= nFactor;
+
+    if( !GDALInvGeoTransform(adfTransform, adfInvertTransform) )
+    {
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to invert transform" );
+        return 0;
+    }
+    GDALApplyGeoTransform(adfInvertTransform, dTLX, dTLY, &x1, &y1);
+    GDALApplyGeoTransform(adfInvertTransform, dBRX, dBRY, &x2, &y2);
+    leftExtra = 0;
+    rightExtra = 0;
+    topExtra = 0;
+    bottomExtra = 0;
+    origWidthIn = round(x2 - x1);
+    origHeightIn = round(y2 - y1);
+
+    /* leftExtra etc in Units of pixels */
+    if( x1 < 0 )
+    {
+        leftExtra = abs(x1);
+        x1 = 0;
+    }
+    if( x2 >= width )
+    {
+        rightExtra = (x2 - width - 1);
+        x2 = width - 1;
+    }
+    if( y1 < 0 )
+    {
+        topExtra = abs(y1);
+        y1 = 0;
+    }
+    if( y2 >= height )
+    {
+        bottomExtra = (y2 - height - 1);
+        y2 = height - 1;
+    }
+    widthIn = round(x2 - x1);
+    heightIn = round(y2 - y1);
+    tlx = x1;
+    tly = y1;
+    brx = tlx + widthIn;
+    bry = tly + heightIn;
+
+    /* leftExtra now in units of the data read */
+    leftExtra = (leftExtra / (double)origWidthIn) * dataWidth;
+    rightExtra = (rightExtra / (double)origWidthIn) * dataWidth;
+    topExtra = (topExtra / (double)origHeightIn) * dataHeight;
+    bottomExtra = (bottomExtra / (double)origHeightIn) * dataHeight;
+
+    info->nXOff = tlx;
+    info->nYOff = tly;
+    info->nXSize = widthIn;
+    info->nYSize = heightIn;
+    info->nDataOffset = leftExtra + (topExtra * dataWidth);
+    info->nBufXSize = dataWidth - leftExtra - rightExtra;
+    info->nBufYSize = dataHeight - topExtra - bottomExtra;
+
+    return 1;
+}
+
+int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, struct extent *extent)
 {
     int count;
     int incount, outcount;
@@ -1323,18 +1396,22 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     int amask = 0x000000;
     /* Read a multiband image */
     int depth = 3; /* this is always 24 bit */
+    struct readInfo info;
     
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
     GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
-    im->w = GDALGetRasterBandXSize(ovh);
-    im->h = GDALGetRasterBandYSize(ovh);
-    
-    im->pixels = CPLMalloc(im->w * im->h * depth);
+    im->w = PIX_PER_CELL * ww;
+    im->h = PIX_PER_CELL * wh;
 
-    memset(im->pixels, 0, im->w * im->h * depth);
+    if( !prepare_for_reading(im->w, im->h, ds, ovh, extent, &info) )
+    {
+        /* error should already be set */
+        return -1;
+    }
     
-    pBuffer = (float*)CPLMalloc(im->w * im->h * sizeof(float));
+    im->pixels = CPLCalloc(im->w * im->h, depth);
+    pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
     /* read in our 3 bands */    
     for( count = 0; count < 3; count++ )
@@ -1347,7 +1424,9 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
       bandh = GDALGetRasterBand(ds,stretch->bands[count]);
       ovh = GDALGetOverview(bandh,overviewIndex);
 
-      GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, pBuffer, im->w, im->h, GDT_Float32, sizeof(float), im->w*sizeof(float));
+      GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
+            &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
+            GDT_Float32, sizeof(float), im->w * sizeof(float) );
 
       if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
       {
@@ -1364,11 +1443,6 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
          outcount += depth;
       }
 
-      /*
-      char szBuffer[64];
-      snprintf( szBuffer, 64, "outfile%d.txt", count );
-      gdal_dump_image(szBuffer,depth,im);
-      */
     }
 
 
@@ -1388,7 +1462,7 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     return 0;
 }
 
-int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch)
+int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, struct extent *extent)
 {
     /* Read a single band image */
     int depth = 3;
@@ -1397,6 +1471,7 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     float *pBuffer;
     int *pRed = NULL, *pGreen = NULL, *pBlue = NULL;
     GDALRATFieldUsage eUsage;
+    struct readInfo info;
     /* tell libcaca how we have encoded the bytes */
     /* red, then green, then blue */    
     int rmask = 0x0000ff;
@@ -1409,14 +1484,22 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
     im->w = GDALGetRasterBandXSize(ovh);
     im->h = GDALGetRasterBandYSize(ovh);
+
+    im->w = PIX_PER_CELL * ww;
+    im->h = PIX_PER_CELL * wh;
+
+    if( !prepare_for_reading(im->w, im->h, ds, ovh, extent, &info) )
+    {
+        /* error should already be set */
+        return -1;
+    }
     
-    im->pixels = CPLMalloc(im->w * im->h * depth);
+    im->pixels = CPLCalloc(im->w * im->h, depth);
+    pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
-    memset(im->pixels, 0, im->w * im->h * depth);
-
-    pBuffer = (float*)CPLMalloc(im->w * im->h * sizeof(float));
-
-    GDALRasterIO( ovh, GF_Read, 0, 0, im->w, im->h, pBuffer, im->w, im->h, GDT_Float32, sizeof(float), im->w*sizeof(float) );
+    GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
+            &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
+            GDT_Float32, sizeof(float), im->w * sizeof(float) );
 
    if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
    {
@@ -1612,10 +1695,10 @@ int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlis
     xsize = GDALGetRasterXSize(file->ds);
     ysize = GDALGetRasterYSize(file->ds);
 
-    file->fullExtent.dXMin = file->adfTransform[0];
-    file->fullExtent.dYMax = file->adfTransform[3];
-    file->fullExtent.dXMax = file->adfTransform[0] + file->adfTransform[1] * xsize;
-    file->fullExtent.dYMin = file->adfTransform[3] + file->adfTransform[5] * ysize;
+    file->fullExtent.dCentreX = file->adfTransform[0] + file->adfTransform[1] * (xsize / 2);
+    file->fullExtent.dCentreY = file->adfTransform[3] + file->adfTransform[5] * (ysize / 2);
+    file->fullExtent.dMetersPerCell = MAX((file->adfTransform[1] * xsize) / ww,
+                    (-file->adfTransform[5] * ysize) / wh);
 
     return 1;
 }
@@ -1649,7 +1732,7 @@ extern struct image * gdal_load_image(struct gdalFile *file, struct extent *exte
    
     if( file->stretch->mode == VIEWER_MODE_RGB )
     {
-      if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch) == -1 )
+      if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
       {
         /* trap error. Should have filled in message */
         CPLFree(im);
@@ -1659,7 +1742,7 @@ extern struct image * gdal_load_image(struct gdalFile *file, struct extent *exte
     }
     else
     {
-      if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch) == -1 )
+      if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
       {
         /* trap error. Should have filled in message */
         CPLFree(im);
