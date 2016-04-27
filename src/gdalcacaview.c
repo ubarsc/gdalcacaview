@@ -34,6 +34,15 @@
 #define GAMMA_FACTOR 1.04f
 #define GAMMA_MAX 100
 #define GAMMA(g) (((g) < 0) ? 1.0 / gammatab[-(g)] : gammatab[(g)])
+#define PIX_PER_CELL 30
+
+/* tell libcaca how we have encoded the bytes */
+/* red, then green, then blue */    
+#define RMASK 0x0000ff
+#define GMASK 0x00ff00
+#define BMASK 0xff0000
+#define AMASK 0x000000
+#define IMG_DEPTH 3
 
 /* libcaca/libcaca contexts */
 caca_canvas_t *cv; caca_display_t *dp;
@@ -696,36 +705,6 @@ int main(int argc, char **argv)
                 int ch = caca_get_event_key_ch(&ev);
                 switch(ch)
             {
-#if 0 /* FIXME */
-            case 'b':
-                i = 1 + caca_get_feature(cv, CACA_BACKGROUND);
-                if(i > CACA_BACKGROUND_MAX) i = CACA_BACKGROUND_MIN;
-                caca_set_feature(cv, i);
-                new_status = STATUS_BACKGROUND;
-                update = 1;
-                break;
-            case 'B':
-                i = -1 + caca_get_feature(cv, CACA_BACKGROUND);
-                if(i < CACA_BACKGROUND_MIN) i = CACA_BACKGROUND_MAX;
-                caca_set_feature(cv, i);
-                new_status = STATUS_BACKGROUND;
-                update = 1;
-                break;
-            case 'a':
-                i = 1 + caca_get_feature(cv, CACA_ANTIALIASING);
-                if(i > CACA_ANTIALIASING_MAX) i = CACA_ANTIALIASING_MIN;
-                caca_set_feature(cv, i);
-                new_status = STATUS_ANTIALIASING;
-                update = 1;
-                break;
-            case 'A':
-                i = -1 + caca_get_feature(cv, CACA_ANTIALIASING);
-                if(i < CACA_ANTIALIASING_MIN) i = CACA_ANTIALIASING_MAX;
-                caca_set_feature(cv, i);
-                new_status = STATUS_ANTIALIASING;
-                update = 1;
-                break;
-#endif
             case 'd':
                 dither_algorithm++;
                 if(algos[dither_algorithm * 2] == NULL)
@@ -953,16 +932,6 @@ int main(int argc, char **argv)
                 caca_printf(cv, 0, wh - 1, "Dithering: %s",
                              caca_get_dither_algorithm(im->dither));
                 break;
-#if 0 /* FIXME */
-            case STATUS_ANTIALIASING:
-                caca_printf(cv, 0, wh - 1, "Antialiasing: %s",
-              caca_get_feature_name(caca_get_feature(cv, CACA_ANTIALIASING)));
-                break;
-            case STATUS_BACKGROUND:
-                caca_printf(cv, 0, wh - 1, "Background: %s",
-              caca_get_feature_name(caca_get_feature(cv, CACA_BACKGROUND)));
-                break;
-#endif
         }
 
         if(help)
@@ -995,7 +964,7 @@ static void print_status(void)
     caca_draw_line(cv, 0, 0, ww - 1, 0, ' ');
     caca_draw_line(cv, 0, wh - 2, ww - 1, wh - 2, '-');
     caca_put_str(cv, 0, 0, "q:Quit +-x:Zoom  gG:Gamma  "
-                            "hjkl:Move  d:Dither  a:Antialias");
+                            "hjkl:Move  d:Dither");
     caca_put_str(cv, ww - strlen("?:Help"), 0, "?:Help");
     caca_printf(cv, ww - 30, wh - 2, "(gamma: %#.3g)", GAMMA(g));
 /*    caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);*/
@@ -1003,6 +972,10 @@ static void print_status(void)
     if( pszStretchStatusString != NULL )
     {
         caca_put_str(cv, 10, wh - 2, pszStretchStatusString);
+    }
+    else
+    {
+        caca_put_str(cv, 10, wh - 2, "No Stretch");
     }
 
     caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_BLACK);
@@ -1022,9 +995,7 @@ static void print_help(int x, int y)
         " hjkl: move view         ",
         " arrows: move view       ",
         " ----------------------- ",
-        " a: antialiasing method  ",
         " d: dithering method     ",
-        " b: background mode      ",
         " ----------------------- ",
         " ?: help                 ",
         " q: quit                 ",
@@ -1073,28 +1044,47 @@ static void draw_checkers(int x, int y, int w, int h)
     }
 }
 
-#define MAX_OVERVIEW_SIZE 3000
-
-int gdal_get_best_overview(GDALDatasetH ds)
+int gdal_get_best_overview(GDALDatasetH ds, struct extent *extent)
 {
     /* look for a suitable overview using band 1 */
-    /* returns -1 if none found */
-    int overviewIndex = -1;
-    GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
-    int count = 0;
-    while( count < GDALGetOverviewCount(bandh) )
+    /* return 0 to use full res, or overviewIndex+1 */
+    GDALRasterBandH bandh = GDALGetRasterBand(ds, 1);
+    int count, nOverviews, nFactor, nBestIndex;
+    double adfTransform[6], dBestPixelsPerCell, dPixelsPerCell;
+
+    nOverviews = GDALGetOverviewCount(bandh);
+    if( nOverviews == 0 )
     {
-      GDALRasterBandH ovh = GDALGetOverview(bandh,count);
-      if( ( GDALGetRasterBandXSize(ovh) < MAX_OVERVIEW_SIZE ) && ( GDALGetRasterBandYSize(ovh) < MAX_OVERVIEW_SIZE ) )
-      {
-        /* use this overview */
-        overviewIndex = count;
-        /* exit the loop */
-        count = GDALGetOverviewCount(bandh);
-      }
-      count++;
+        /* no overviews - use full resolution */
+        return 0;
     }
-    return overviewIndex;
+
+    if( GDALGetGeoTransform(ds, adfTransform) != CE_None )
+    {
+        /* Should raise an error here? */
+        return 0;
+    }
+
+    /* full resolution */
+    dBestPixelsPerCell = extent->dMetersPerCell / adfTransform[1];
+    nBestIndex = 0; /* 0 is full res, otherwise overview+1 */
+
+    /* now overviews */
+    /* we want something close to PIX_PER_CELL but greater */
+    for( count = 0; count < nOverviews; count++ )
+    {
+        GDALRasterBandH ovh = GDALGetOverview(bandh, count);
+        nFactor = GDALGetRasterXSize(ds) / GDALGetRasterBandXSize(ovh);
+        dPixelsPerCell = extent->dMetersPerCell / (adfTransform[1] * nFactor);
+        if( ( dPixelsPerCell > PIX_PER_CELL ) && 
+            ( ( dPixelsPerCell - PIX_PER_CELL ) < ( dBestPixelsPerCell - PIX_PER_CELL ) ) )
+        {
+            dBestPixelsPerCell = dPixelsPerCell;
+            nBestIndex = count + 1;
+        }
+    }
+
+    return nBestIndex;
 }
 
 void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
@@ -1284,8 +1274,6 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
     return 1;
 }
 
-#define PIX_PER_CELL 30
-
 /* Info for passing to GDALRasterIO */
 struct readInfo
 {
@@ -1387,20 +1375,19 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     int count;
     int incount, outcount;
     float *pBuffer;
-
-    /* tell libcaca how we have encoded the bytes */
-    /* red, then green, then blue */    
-    int rmask = 0x0000ff;
-    int gmask = 0x00ff00;
-    int bmask = 0xff0000;
-    int amask = 0x000000;
-    /* Read a multiband image */
-    int depth = 3; /* this is always 24 bit */
     struct readInfo info;
+    GDALRasterBandH ovh;
     
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
-    GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
+    if( overviewIndex == 0 )
+    {
+        ovh = bandh;
+    }
+    else
+    {
+        ovh = GDALGetOverview(bandh,overviewIndex - 1);
+    }
     im->w = PIX_PER_CELL * ww;
     im->h = PIX_PER_CELL * wh;
 
@@ -1410,7 +1397,7 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
         return -1;
     }
     
-    im->pixels = CPLCalloc(im->w * im->h, depth);
+    im->pixels = (char*)CPLCalloc(im->w * im->h, IMG_DEPTH);
     pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
     /* read in our 3 bands */    
@@ -1422,7 +1409,14 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
       /* and then back to band[0] etc. So we call RasterIO 3 times, one for */
       /* each band and tell it to fill in every third pixel each time */
       bandh = GDALGetRasterBand(ds,stretch->bands[count]);
-      ovh = GDALGetOverview(bandh,overviewIndex);
+      if( overviewIndex == 0 )
+      {
+          ovh = bandh;
+      }
+      else
+      {
+          ovh = GDALGetOverview(bandh,overviewIndex - 1);
+      }
 
       GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
             &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
@@ -1440,15 +1434,15 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
       for(incount = 0; incount < (im->w * im->h); incount++ )
       {
          im->pixels[outcount] = pBuffer[incount];
-         outcount += depth;
+         outcount += IMG_DEPTH;
       }
 
     }
 
 
     /* Create the libcaca dither */
-    im->dither = caca_create_dither(8*depth, im->w, im->h, depth * im->w,
-                                     rmask, gmask, bmask, amask);
+    im->dither = caca_create_dither(8 * IMG_DEPTH, im->w, im->h, IMG_DEPTH * im->w,
+                                     RMASK, GMASK, BMASK, AMASK);
     if(!im->dither)
     {
         CPLFree(im->pixels);
@@ -1465,23 +1459,24 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
 int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, struct extent *extent)
 {
     /* Read a single band image */
-    int depth = 3;
     int count, outcount, incount;
     GDALRasterAttributeTableH rath;
     float *pBuffer;
     int *pRed = NULL, *pGreen = NULL, *pBlue = NULL;
     GDALRATFieldUsage eUsage;
     struct readInfo info;
-    /* tell libcaca how we have encoded the bytes */
-    /* red, then green, then blue */    
-    int rmask = 0x0000ff;
-    int gmask = 0x00ff00;
-    int bmask = 0xff0000;
-    int amask = 0x000000;
+    GDALRasterBandH ovh;
     
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,stretch->bands[0]);
-    GDALRasterBandH ovh = GDALGetOverview(bandh,overviewIndex);
+    if( overviewIndex == 0 )
+    {
+        ovh = bandh;
+    }
+    else
+    {
+        ovh = GDALGetOverview(bandh,overviewIndex - 1);
+    }
     im->w = GDALGetRasterBandXSize(ovh);
     im->h = GDALGetRasterBandYSize(ovh);
 
@@ -1494,7 +1489,7 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
         return -1;
     }
     
-    im->pixels = CPLCalloc(im->w * im->h, depth);
+    im->pixels = (char*)CPLCalloc(im->w * im->h, IMG_DEPTH);
     pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
     GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
@@ -1592,8 +1587,8 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     }
 
     /* Create the libcaca dither */
-    im->dither = caca_create_dither(8*depth, im->w, im->h, depth * im->w,
-                                     rmask, gmask, bmask, amask);
+    im->dither = caca_create_dither(8 * IMG_DEPTH, im->w, im->h, IMG_DEPTH * im->w,
+                                     RMASK, GMASK, BMASK, AMASK);
     if(!im->dither)
     {
         CPLFree(im->pixels);
@@ -1721,14 +1716,7 @@ extern struct image * gdal_load_image(struct gdalFile *file, struct extent *exte
     im = CPLMalloc(sizeof(struct image));
     
     /* Find the best overview level to use */
-    overviewIndex = gdal_get_best_overview(file->ds);
-    if( overviewIndex == -1 )
-    {
-      CPLFree(im);
-      gdal_close_file(file);
-      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "%s has no overviews. Run gdalcalcstats -pyramid first", GDALGetDescription(file->ds) );
-      return NULL;
-    }
+    overviewIndex = gdal_get_best_overview(file->ds, extent);
    
     if( file->stretch->mode == VIEWER_MODE_RGB )
     {
@@ -1762,10 +1750,4 @@ void gdal_unload_image(struct image * im)
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
 
-    /* status string */
-    if(pszStretchStatusString != NULL)
-    {
-        CPLFree(pszStretchStatusString);
-        pszStretchStatusString = NULL;
-    }
 }
