@@ -39,10 +39,18 @@
 
 /* tell libcaca how we have encoded the bytes */
 /* red, then green, then blue */
-#define RMASK 0x0000ff
-#define GMASK 0x00ff00
-#define BMASK 0xff0000
-#define AMASK 0x000000
+#ifdef CPL_MSB
+    /* big endian */
+    #define RMASK 0xff0000
+    #define GMASK 0x00ff00
+    #define BMASK 0x0000ff
+    #define AMASK 0x000000
+#else
+    #define RMASK 0x0000ff
+    #define GMASK 0x00ff00
+    #define BMASK 0xff0000
+    #define AMASK 0x000000
+#endif
 #define IMG_DEPTH 3
 
 /* libcaca/libcaca contexts */

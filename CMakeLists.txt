@@ -40,6 +40,9 @@ set(LIBCACA_LIBRARIES -L${LIBCACA_LIB_PATH} -lcaca )
 include_directories(${GDAL_INCLUDE_DIR})
 set(GDAL_LIBRARIES -L${GDAL_LIB_PATH} -lgdal)
 
+if(NOT MSVC)
+    set(MATH_LIBRARY -lm)
+endif()
 ###############################################################################
 
 ###############################################################################
@@ -49,7 +52,7 @@ if(CMAKE_COMPILER_IS_GNUCC)
 endif()
 
 add_executable(${GDALCACAVIEW_BIN_NAME} ${PROJECT_SOURCE_DIR}/gdalcacaview.c)
-target_link_libraries(${GDALCACAVIEW_BIN_NAME} ${GDAL_LIBRARIES} ${LIBCACA_LIBRARIES})
+target_link_libraries(${GDALCACAVIEW_BIN_NAME} ${GDAL_LIBRARIES} ${LIBCACA_LIBRARIES} ${MATH_LIBRARY})
 install(TARGETS ${GDALCACAVIEW_BIN_NAME} DESTINATION bin PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
 ###############################################################################
