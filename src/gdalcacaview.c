@@ -731,8 +731,8 @@ int main(int argc, char **argv)
                     currpid = GetCurrentProcessId();
 #endif
                     fscanf(fp, "%llu %lf %lf %lf\n", &pid, &dX, &dY, &dMetersPerCell);
-                    if( (currpid != pid ) && (dX != dispExtent.dCentreX) && (dY != dispExtent.dCentreY)
-                            && (dMetersPerCell != dispExtent.dMetersPerCell) )
+                    if( (currpid != pid ) || (dX != dispExtent.dCentreX) || (dY != dispExtent.dCentreY)
+                            || (dMetersPerCell != dispExtent.dMetersPerCell) )
                     {
                         /* don't bother with our own location */
                         dispExtent.dCentreX = dX;
@@ -1365,8 +1365,11 @@ int prepare_for_reading(int dataWidth, int dataHeight, GDALDatasetH ds, GDALRast
     height = GDALGetRasterBandYSize(ovh);
     nFactor = GDALGetRasterXSize(ds) / width;
 
-    dTLX = extent->dCentreX - ((ww / 2.0) * extent->dMetersPerCell);
-    dBRX = extent->dCentreX + ((ww / 2.0) * extent->dMetersPerCell);
+    /* Fiddle to make picture come out correct dimensions */
+    /* I think this undoes some of the stuff libcaca does */
+    /* Needs more investigation */
+    dTLX = extent->dCentreX - ((ww / 2.0) * extent->dMetersPerCell * 0.5);
+    dBRX = extent->dCentreX + ((ww / 2.0) * extent->dMetersPerCell * 0.5);
     dTLY = extent->dCentreY + ((wh / 2.0) * extent->dMetersPerCell);
     dBRY = extent->dCentreY - ((wh / 2.0) * extent->dMetersPerCell);
 
