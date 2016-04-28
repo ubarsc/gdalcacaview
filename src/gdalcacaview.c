@@ -35,6 +35,7 @@
 #define GAMMA_MAX 100
 #define GAMMA(g) (((g) < 0) ? 1.0 / gammatab[-(g)] : gammatab[(g)])
 #define PIX_PER_CELL 30
+#define GEOLINK_TIMEOUT 1000000
 
 /* tell libcaca how we have encoded the bytes */
 /* red, then green, then blue */    
@@ -407,6 +408,7 @@ void printUsage()
     printf(" --printdrivers\tPrint list of available drivers and exit\n");
     printf(" --driver DRIVER\tUse the specified driver. If not given, uses default\n");
     printf(" --stretch STRETCH\tUse the specified stretch string. If not given uses default stretch rules\n");
+    printf(" --geolink FILE\tUse the specified file to communicate with other instances and geolink\n");
     printf("and filename is a GDAL supported dataset.\n");
 }
 
@@ -439,6 +441,7 @@ int main(int argc, char **argv)
     char *pszFileName = NULL;
     struct stretchlist stretchList;
     struct stretch *pCmdStretch = NULL; /* non-NULL when stretch is passed in on command line */
+    char *pszGeolinkFile = NULL;
     struct extent dispExtent;
     struct gdalFile gdalfile;
 
@@ -602,6 +605,20 @@ int main(int argc, char **argv)
                 exit(1);
             }
         }
+        else if( strcmp( argv[i], "--geolink") == 0 )
+        {
+            if( i+1 < argc )
+            {
+                pszGeolinkFile = argv[i+1];
+                i++;
+            }
+            else
+            {
+                fprintf(stderr, "Must specify geolink file\n");
+                printUsage();
+                exit(1);
+            }
+        }
         else if( (strcmp( argv[i], "-h" ) == 0) || 
                 (strcmp( argv[i], "--help" ) == 0) )
         {
@@ -695,8 +712,43 @@ int main(int argc, char **argv)
 
         if(update)
             event = caca_get_event(dp, event_mask, &ev, 0);
+        else if( pszGeolinkFile != NULL )
+        {
+            /* set timeout to 1 second */
+            event = caca_get_event(dp, event_mask, &ev, GEOLINK_TIMEOUT);
+            if( event == 0 )
+            {
+                /* timeout and we are geolinking */
+                /* read file */
+                FILE *fp = fopen(pszGeolinkFile, "r");
+                if( fp != NULL )
+                {
+                    double dX, dY, dMetersPerCell;
+                    unsigned long long currpid, pid;
+#if !defined(_WIN32) || defined(__CYGWIN__) 
+                    currpid = getpid();
+#else
+                    currpid = GetCurrentProcessId();
+#endif
+                    fscanf(fp, "%llu %lf %lf %lf\n", &pid, &dX, &dY, &dMetersPerCell);
+                    if( (currpid != pid ) && (dX != dispExtent.dCentreX) && (dY != dispExtent.dCentreY)
+                            && (dMetersPerCell != dispExtent.dMetersPerCell) )
+                    {
+                        /* don't bother with our own location */
+                        dispExtent.dCentreX = dX;
+                        dispExtent.dCentreY = dY;
+                        dispExtent.dMetersPerCell = dMetersPerCell;
+                        rezoom = 1;
+                        update = 1;
+                    }
+                    fclose(fp);
+                }
+            }
+        }
         else
+        {
             event = caca_get_event(dp, event_mask, &ev, -1);
+        }
 
         while(event)
         {
@@ -886,6 +938,24 @@ int main(int argc, char **argv)
             }
 
             im = gdal_load_image(&gdalfile, &dispExtent);
+
+            /* Write out new information to geolink file if required */
+            if( pszGeolinkFile != NULL )
+            {
+                FILE *fp = fopen(pszGeolinkFile, "w");
+                if( fp != NULL )
+                {
+                    unsigned long long pid;
+#if !defined(_WIN32) || defined(__CYGWIN__) 
+                    pid = getpid();
+#else
+                    pid = GetCurrentProcessId();
+#endif
+                    fprintf(fp, "%llu %f %f %f\n", pid, dispExtent.dCentreX, 
+                        dispExtent.dCentreY, dispExtent.dMetersPerCell);
+                    fclose(fp);
+                }
+            }
 
             rezoom = 0;
         }
@@ -1379,7 +1449,7 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     GDALRasterBandH ovh;
     
     /* fill in the width and height from the overview */
-    GDALRasterBandH bandh = GDALGetRasterBand(ds,1);
+    GDALRasterBandH bandh = GDALGetRasterBand(ds,stretch->bands[0]);
     if( overviewIndex == 0 )
     {
         ovh = bandh;
