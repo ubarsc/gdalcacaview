@@ -14,7 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#if !defined(_WIN32) || defined(__CYGWIN__) 
+#if !defined(_WIN32) || defined(__CYGWIN__)
 #include <sys/types.h>
 #include <pwd.h>
 #endif
@@ -38,7 +38,7 @@
 #define GEOLINK_TIMEOUT 1000000
 
 /* tell libcaca how we have encoded the bytes */
-/* red, then green, then blue */    
+/* red, then green, then blue */
 #define RMASK 0x0000ff
 #define GMASK 0x00ff00
 #define BMASK 0xff0000
@@ -46,7 +46,8 @@
 #define IMG_DEPTH 3
 
 /* libcaca/libcaca contexts */
-caca_canvas_t *cv; caca_display_t *dp;
+caca_canvas_t *cv;
+caca_display_t *dp;
 
 /* Area for printing GDAL error messages */
 #define GDAL_ERROR_SIZE 1024
@@ -54,11 +55,12 @@ char szGDALMessages[GDAL_ERROR_SIZE];
 
 /* Default stretch rules */
 char *pszDefaultStretchRules[] = {"equal,1,1:colortable,none,,1",
-"equal,1,-1:greyscale,none,,1",
-"equal,2,-1:greyscale,none,,1",
-"equal,3,-1:rgb,none,,1|2|3",
-"less,6,-1:rgb,stddev,2.0,4|3|2",
-"greater,5,-1:rgb,stddev,2.0,5|4|2", NULL};
+                                  "equal,1,-1:greyscale,none,,1",
+                                  "equal,2,-1:greyscale,none,,1",
+                                  "equal,3,-1:rgb,none,,1|2|3",
+                                  "less,6,-1:rgb,stddev,2.0,4|3|2",
+                                  "greater,5,-1:rgb,stddev,2.0,5|4|2", NULL
+                                 };
 
 
 /* stolen from common-image.h */
@@ -141,12 +143,12 @@ char *pszStretchStatusString = NULL;
 /* Takes the rule part (left of :) and puts it into the stretch */
 int rulepart_from_string(struct stretch *newStretch, const char *pszString)
 {
-char **pszTokens;
-char *pszTmp;
-int n = 0;
+    char **pszTokens;
+    char *pszTmp;
+    int n = 0;
 
-    pszTokens = CSLTokenizeString2(pszString, ",", 
-        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
+    pszTokens = CSLTokenizeString2(pszString, ",",
+                                   CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
 
     pszTmp = pszTokens[n];
     if( pszTmp == NULL )
@@ -176,7 +178,7 @@ int n = 0;
         CSLDestroy(pszTokens);
         return 0;
     }
-    newStretch->value = atol(pszTmp);    
+    newStretch->value = atol(pszTmp);
 
     n++;
     pszTmp = pszTokens[n];
@@ -196,13 +198,13 @@ int n = 0;
 /* deals with the part to the right of the : */
 int stretchpart_from_string(struct stretch *newStretch, const char *pszString)
 {
-char **pszTokens;
-char **pszExtraTokens;
-char *pszTmp;
-int n = 0, i;
+    char **pszTokens;
+    char **pszExtraTokens;
+    char *pszTmp;
+    int n = 0, i;
 
-    pszTokens = CSLTokenizeString2(pszString, ",", 
-        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
+    pszTokens = CSLTokenizeString2(pszString, ",",
+                                   CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
 
     pszTmp = pszTokens[n];
     if( pszTmp == NULL )
@@ -256,7 +258,7 @@ int n = 0, i;
         return 0;
     }
     pszExtraTokens = CSLTokenizeString2(pszTmp, "|", CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
-    i = 0; 
+    i = 0;
     while( i < 2 )
     {
         pszTmp = pszExtraTokens[i];
@@ -276,7 +278,7 @@ int n = 0, i;
         return 0;
     }
     pszExtraTokens = CSLTokenizeString2(pszTmp, "|", CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
-    i = 0; 
+    i = 0;
     while( i < 3 )
     {
         pszTmp = pszExtraTokens[i];
@@ -294,12 +296,12 @@ int n = 0, i;
 
 int stretch_from_string(struct stretch *newStretch, const char *pszString)
 {
-char **pszRuleAndStretch;
-char *pszTmp;
+    char **pszRuleAndStretch;
+    char *pszTmp;
 
     /* First split into the 2 parts - rule and stretch */
     pszRuleAndStretch = CSLTokenizeString2(pszString, ":",
-        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
+                                           CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_ALLOWEMPTYTOKENS);
 
     pszTmp = pszRuleAndStretch[0];
     if( pszTmp == NULL )
@@ -338,13 +340,13 @@ char *pszTmp;
 /* returns NULL on failure */
 struct stretch *get_stretch_for_gdal(struct stretchlist *stretchList, GDALDatasetH ds)
 {
-int match, i, hasRed, hasGreen, hasBlue, hasAlpha, ncols, c;
-int rasterCount = GDALGetRasterCount(ds);
-struct stretch *pStretch;
-GDALRasterBandH bandh;
-GDALRasterAttributeTableH rath;
-const char *psz;
-GDALRATFieldUsage usage;
+    int match, i, hasRed, hasGreen, hasBlue, hasAlpha, ncols, c;
+    int rasterCount = GDALGetRasterCount(ds);
+    struct stretch *pStretch;
+    GDALRasterBandH bandh;
+    GDALRasterAttributeTableH rath;
+    const char *psz;
+    GDALRATFieldUsage usage;
 
     for( i = 0; i < stretchList->num_stretches; i++ )
     {
@@ -404,7 +406,7 @@ void printUsage()
 {
     printf("gdalcacaview [options] filename\n\n");
 
-    printf("where options is one of:\n"); 
+    printf("where options is one of:\n");
     printf(" --printdrivers\tPrint list of available drivers and exit\n");
     printf(" --driver DRIVER\tUse the specified driver. If not given, uses default\n");
     printf(" --stretch STRETCH\tUse the specified stretch string. If not given uses default stretch rules\n");
@@ -416,7 +418,7 @@ void printDrivers()
 {
     int i;
     char const* const* list;
-    
+
     printf("Driver\tDescription\n");
     printf("------\t-----------\n");
     list = caca_get_display_driver_list();
@@ -448,10 +450,10 @@ int main(int argc, char **argv)
     memset(&dispExtent, 0, sizeof(dispExtent));
     memset(&gdalfile, 0, sizeof(gdalfile));
 
-/* -------------------------------------------------------------------- */
-/*      Read config file if it exists                                   */
-/* -------------------------------------------------------------------- */
-#if defined(_WIN32) && !defined(__CYGWIN__) 
+    /* -------------------------------------------------------------------- */
+    /*      Read config file if it exists                                   */
+    /* -------------------------------------------------------------------- */
+#if defined(_WIN32) && !defined(__CYGWIN__)
     pszHomeDir = getenv("USERPROFILE");
     if( pszHomeDir == NULL )
     {
@@ -459,7 +461,7 @@ int main(int argc, char **argv)
         pszConfigFile = CPLMalloc(strlen(pszHomeDir) + 6);
         /* copy in the path */
         strcpy(pszConfigFile, pszHomeDir);
-        
+
     }
     else
     {
@@ -507,8 +509,8 @@ int main(int argc, char **argv)
         i = 0;
         while(pszConfigLines[i] != NULL)
         {
-            pszConfigSingleLine = CSLTokenizeString2(pszConfigLines[i], "=", 
-                        CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
+            pszConfigSingleLine = CSLTokenizeString2(pszConfigLines[i], "=",
+                                  CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
             if( ( pszConfigSingleLine[0] != NULL) && (pszConfigSingleLine[1] != NULL ) )
             {
                 if( strcmp(pszConfigSingleLine[0], "Driver") == 0)
@@ -519,8 +521,8 @@ int main(int argc, char **argv)
                 {
                     /* new rule */
                     stretchList.num_stretches++;
-                    stretchList.stretches = (struct stretch*)CPLRealloc(stretchList.stretches, 
-                                    sizeof(struct stretch) * stretchList.num_stretches);
+                    stretchList.stretches = (struct stretch*)CPLRealloc(stretchList.stretches,
+                                            sizeof(struct stretch) * stretchList.num_stretches);
                     if( !stretch_from_string(&stretchList.stretches[stretchList.num_stretches-1], pszConfigSingleLine[1]) )
                     {
                         exit(1);
@@ -549,8 +551,8 @@ int main(int argc, char **argv)
         while(pszDefaultStretchRules[i] != NULL)
         {
             stretchList.num_stretches++;
-            stretchList.stretches = (struct stretch*)CPLRealloc(stretchList.stretches, 
-                            sizeof(struct stretch) * stretchList.num_stretches);
+            stretchList.stretches = (struct stretch*)CPLRealloc(stretchList.stretches,
+                                    sizeof(struct stretch) * stretchList.num_stretches);
             if( !stretch_from_string(&stretchList.stretches[stretchList.num_stretches-1], pszDefaultStretchRules[i]) )
             {
                 exit(1);
@@ -559,9 +561,9 @@ int main(int argc, char **argv)
         }
     }
 
-/* -------------------------------------------------------------------- */
-/*      Handle command line arguments.                                  */
-/* -------------------------------------------------------------------- */
+    /* -------------------------------------------------------------------- */
+    /*      Handle command line arguments.                                  */
+    /* -------------------------------------------------------------------- */
     for( i = 1; i < argc; i++ )
     {
         if( strcmp(argv[i], "--printdrivers" ) == 0 )
@@ -619,15 +621,15 @@ int main(int argc, char **argv)
                 exit(1);
             }
         }
-        else if( (strcmp( argv[i], "-h" ) == 0) || 
-                (strcmp( argv[i], "--help" ) == 0) )
+        else if( (strcmp( argv[i], "-h" ) == 0) ||
+                 (strcmp( argv[i], "--help" ) == 0) )
         {
             printUsage();
             exit(1);
         }
         else if( argv[i][0] == '-' )
         {
-            fprintf(stderr, "Option %s incomplete, or not recognised.\n\n", 
+            fprintf(stderr, "Option %s incomplete, or not recognised.\n\n",
                     argv[i] );
             printUsage();
             exit(1);
@@ -646,14 +648,14 @@ int main(int argc, char **argv)
             reload = 1;
         }
     }
-    
+
     if( pszFileName == NULL )
     {
         printf( "filename(s) not specified\n" );
         printUsage();
         exit(1);
     }
-    
+
     /* Initialise libcaca */
     cv = caca_create_canvas(0, 0);
     if(!cv)
@@ -661,7 +663,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Unable to initialise libcaca\n");
         return 1;
     }
-    
+
     /* If they have specified driver, use that */
     if( pszDriver != NULL )
     {
@@ -705,8 +707,8 @@ int main(int argc, char **argv)
     {
         caca_event_t ev;
         unsigned int const event_mask = CACA_EVENT_KEY_PRESS
-                                      | CACA_EVENT_RESIZE
-                                      | CACA_EVENT_QUIT;
+                                        | CACA_EVENT_RESIZE
+                                        | CACA_EVENT_QUIT;
         unsigned int new_status = 0, new_help = 0;
         int event;
 
@@ -725,21 +727,23 @@ int main(int argc, char **argv)
                 {
                     double dX, dY, dMetersPerCell;
                     unsigned long long currpid, pid;
-#if !defined(_WIN32) || defined(__CYGWIN__) 
+#if !defined(_WIN32) || defined(__CYGWIN__)
                     currpid = getpid();
 #else
                     currpid = GetCurrentProcessId();
 #endif
-                    fscanf(fp, "%llu %lf %lf %lf\n", &pid, &dX, &dY, &dMetersPerCell);
-                    if( (currpid != pid ) || (dX != dispExtent.dCentreX) || (dY != dispExtent.dCentreY)
-                            || (dMetersPerCell != dispExtent.dMetersPerCell) )
+                    if( fscanf(fp, "%llu %lf %lf %lf\n", &pid, &dX, &dY, &dMetersPerCell) == 4 )
                     {
-                        /* don't bother with our own location */
-                        dispExtent.dCentreX = dX;
-                        dispExtent.dCentreY = dY;
-                        dispExtent.dMetersPerCell = dMetersPerCell;
-                        rezoom = 1;
-                        update = 1;
+                        if( (currpid != pid ) || (dX != dispExtent.dCentreX) || (dY != dispExtent.dCentreY)
+                                || (dMetersPerCell != dispExtent.dMetersPerCell) )
+                        {
+                            /* don't bother with our own pid or location */
+                            dispExtent.dCentreX = dX;
+                            dispExtent.dCentreY = dY;
+                            dispExtent.dMetersPerCell = dMetersPerCell;
+                            rezoom = 1;
+                            update = 1;
+                        }
                     }
                     fclose(fp);
                 }
@@ -756,112 +760,112 @@ int main(int argc, char **argv)
             {
                 int ch = caca_get_event_key_ch(&ev);
                 switch(ch)
-            {
-            case 'd':
-                dither_algorithm++;
-                if(algos[dither_algorithm * 2] == NULL)
-                    dither_algorithm = 0;
-                caca_set_dither_algorithm(im->dither,
-                                           algos[dither_algorithm * 2]);
-                new_status = STATUS_DITHERING;
-                update = 1;
-                break;
-            case 'D':
-                dither_algorithm--;
-                if(dither_algorithm < 0)
-                    while(algos[dither_algorithm * 2 + 2] != NULL)
-                        dither_algorithm++;
-                caca_set_dither_algorithm(im->dither,
-                                           algos[dither_algorithm * 2]);
-                new_status = STATUS_DITHERING;
-                update = 1;
-                break;
-            case '+':
-                if(!rezoom)
                 {
-                    dispExtent.dMetersPerCell *= ZOOM_IN_FACTOR;
+                case 'd':
+                    dither_algorithm++;
+                    if(algos[dither_algorithm * 2] == NULL)
+                        dither_algorithm = 0;
+                    caca_set_dither_algorithm(im->dither,
+                                              algos[dither_algorithm * 2]);
+                    new_status = STATUS_DITHERING;
                     update = 1;
-                    rezoom = 1;
-                }
-                break;
-            case '-':
-                if(!rezoom)
-                {
-                    dispExtent.dMetersPerCell *= ZOOM_OUT_FACTOR;
+                    break;
+                case 'D':
+                    dither_algorithm--;
+                    if(dither_algorithm < 0)
+                        while(algos[dither_algorithm * 2 + 2] != NULL)
+                            dither_algorithm++;
+                    caca_set_dither_algorithm(im->dither,
+                                              algos[dither_algorithm * 2]);
+                    new_status = STATUS_DITHERING;
                     update = 1;
-                    rezoom = 1;
-                }
-                break;
-            case 'G':
-                update = 1;
-                set_gamma(g + 1);
-                break;
-            case 'g':
-                update = 1;
-                set_gamma(g - 1);
-                break;
-            case 'x':
-            case 'X':
-                if(!rezoom)
-                {
+                    break;
+                case '+':
+                    if(!rezoom)
+                    {
+                        dispExtent.dMetersPerCell *= ZOOM_IN_FACTOR;
+                        update = 1;
+                        rezoom = 1;
+                    }
+                    break;
+                case '-':
+                    if(!rezoom)
+                    {
+                        dispExtent.dMetersPerCell *= ZOOM_OUT_FACTOR;
+                        update = 1;
+                        rezoom = 1;
+                    }
+                    break;
+                case 'G':
                     update = 1;
-                    dispExtent.dCentreX = gdalfile.fullExtent.dCentreX;
-                    dispExtent.dCentreY = gdalfile.fullExtent.dCentreY;
-                    dispExtent.dMetersPerCell = gdalfile.fullExtent.dMetersPerCell;
-                    rezoom = 1;
-                    set_gamma(0);
-                }
-                break;
-            case 'k':
-            case 'K':
-            case CACA_KEY_UP:
-                if(!rezoom)
-                {
-                    dispExtent.dCentreY += ((wh * PAN_STEP) * dispExtent.dMetersPerCell);
-                    rezoom = 1;
+                    set_gamma(g + 1);
+                    break;
+                case 'g':
                     update = 1;
-                }
-                break;
-            case 'j':
-            case 'J':
-            case CACA_KEY_DOWN:
-                if(!rezoom)
-                {
-                    dispExtent.dCentreY -= ((wh * PAN_STEP) * dispExtent.dMetersPerCell);
-                    rezoom = 1;
+                    set_gamma(g - 1);
+                    break;
+                case 'x':
+                case 'X':
+                    if(!rezoom)
+                    {
+                        update = 1;
+                        dispExtent.dCentreX = gdalfile.fullExtent.dCentreX;
+                        dispExtent.dCentreY = gdalfile.fullExtent.dCentreY;
+                        dispExtent.dMetersPerCell = gdalfile.fullExtent.dMetersPerCell;
+                        rezoom = 1;
+                        set_gamma(0);
+                    }
+                    break;
+                case 'k':
+                case 'K':
+                case CACA_KEY_UP:
+                    if(!rezoom)
+                    {
+                        dispExtent.dCentreY += ((wh * PAN_STEP) * dispExtent.dMetersPerCell);
+                        rezoom = 1;
+                        update = 1;
+                    }
+                    break;
+                case 'j':
+                case 'J':
+                case CACA_KEY_DOWN:
+                    if(!rezoom)
+                    {
+                        dispExtent.dCentreY -= ((wh * PAN_STEP) * dispExtent.dMetersPerCell);
+                        rezoom = 1;
+                        update = 1;
+                    }
+                    break;
+                case 'h':
+                case 'H':
+                case CACA_KEY_LEFT:
+                    if(!rezoom)
+                    {
+                        dispExtent.dCentreX -= ((ww * PAN_STEP) * dispExtent.dMetersPerCell);
+                        rezoom = 1;
+                        update = 1;
+                    }
+                    break;
+                case 'l':
+                case 'L':
+                case CACA_KEY_RIGHT:
+                    if(!rezoom)
+                    {
+                        dispExtent.dCentreX += ((ww * PAN_STEP) * dispExtent.dMetersPerCell);
+                        rezoom = 1;
+                        update = 1;
+                    }
+                    break;
+                case '?':
+                    new_help = !help;
                     update = 1;
+                    break;
+                case 'q':
+                case 'Q':
+                case CACA_KEY_ESCAPE:
+                    quit = 1;
+                    break;
                 }
-                break;
-            case 'h':
-            case 'H':
-            case CACA_KEY_LEFT:
-                if(!rezoom)
-                {
-                    dispExtent.dCentreX -= ((ww * PAN_STEP) * dispExtent.dMetersPerCell);
-                    rezoom = 1;
-                    update = 1;
-                }
-                break;
-            case 'l':
-            case 'L':
-            case CACA_KEY_RIGHT:
-                if(!rezoom)
-                {
-                    dispExtent.dCentreX += ((ww * PAN_STEP) * dispExtent.dMetersPerCell);
-                    rezoom = 1;
-                    update = 1;
-                }
-                break;
-            case '?':
-                new_help = !help;
-                update = 1;
-                break;
-            case 'q':
-            case 'Q':
-            case CACA_KEY_ESCAPE:
-                quit = 1;
-                break;
-            }
             }
             else if(caca_get_event_type(&ev) == CACA_EVENT_RESIZE)
             {
@@ -946,13 +950,13 @@ int main(int argc, char **argv)
                 if( fp != NULL )
                 {
                     unsigned long long pid;
-#if !defined(_WIN32) || defined(__CYGWIN__) 
+#if !defined(_WIN32) || defined(__CYGWIN__)
                     pid = getpid();
 #else
                     pid = GetCurrentProcessId();
 #endif
-                    fprintf(fp, "%llu %f %f %f\n", pid, dispExtent.dCentreX, 
-                        dispExtent.dCentreY, dispExtent.dMetersPerCell);
+                    fprintf(fp, "%llu %f %f %f\n", pid, dispExtent.dCentreX,
+                            dispExtent.dCentreY, dispExtent.dMetersPerCell);
                     fclose(fp);
                 }
             }
@@ -968,7 +972,7 @@ int main(int argc, char **argv)
             char *buffer;
             char *error = " Error loading `%s'. ";
             int len = strlen(error) + strlen(pszFileName);
-            
+
             if( strlen( szGDALMessages ) != 0 )
             {
                 /* if there was a message returned use it */
@@ -998,10 +1002,10 @@ int main(int argc, char **argv)
         caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_BLACK);
         switch(status)
         {
-            case STATUS_DITHERING:
-                caca_printf(cv, 0, wh - 1, "Dithering: %s",
-                             caca_get_dither_algorithm(im->dither));
-                break;
+        case STATUS_DITHERING:
+            caca_printf(cv, 0, wh - 1, "Dithering: %s",
+                        caca_get_dither_algorithm(im->dither));
+            break;
         }
 
         if(help)
@@ -1034,10 +1038,10 @@ static void print_status(void)
     caca_draw_line(cv, 0, 0, ww - 1, 0, ' ');
     caca_draw_line(cv, 0, wh - 2, ww - 1, wh - 2, '-');
     caca_put_str(cv, 0, 0, "q:Quit +-x:Zoom  gG:Gamma  "
-                            "hjkl:Move  d:Dither");
+                 "hjkl:Move  d:Dither");
     caca_put_str(cv, ww - strlen("?:Help"), 0, "?:Help");
     caca_printf(cv, ww - 30, wh - 2, "(gamma: %#.3g)", GAMMA(g));
-/*    caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);*/
+    /*    caca_printf(cv, ww - 14, wh - 2, "(zoom: %s%i)", zoom > 0 ? "+" : "", zoom);*/
 
     if( pszStretchStatusString != NULL )
     {
@@ -1091,7 +1095,7 @@ static void set_gamma(int new_gamma)
     if(g < -GAMMA_MAX) g = -GAMMA_MAX;
 
     caca_set_dither_gamma(im->dither,
-                           (g < 0) ? 1.0 / gammatab[-g] : gammatab[g]);
+                          (g < 0) ? 1.0 / gammatab[-g] : gammatab[g]);
 }
 
 static void draw_checkers(int x, int y, int w, int h)
@@ -1105,13 +1109,13 @@ static void draw_checkers(int x, int y, int w, int h)
 
     for(yn = y > 0 ? y : 0; yn < y + h; yn++)
         for(xn = x > 0 ? x : 0; xn < x + w; xn++)
-    {
-        if((((xn - x) / 5) ^ ((yn - y) / 3)) & 1)
-            caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_DARKGRAY);
-        else
-            caca_set_color_ansi(cv, CACA_DARKGRAY, CACA_LIGHTGRAY);
-        caca_put_char(cv, xn, yn, ' ');
-    }
+        {
+            if((((xn - x) / 5) ^ ((yn - y) / 3)) & 1)
+                caca_set_color_ansi(cv, CACA_LIGHTGRAY, CACA_DARKGRAY);
+            else
+                caca_set_color_ansi(cv, CACA_DARKGRAY, CACA_LIGHTGRAY);
+            caca_put_char(cv, xn, yn, ' ');
+        }
 }
 
 int gdal_get_best_overview(GDALDatasetH ds, struct extent *extent)
@@ -1146,8 +1150,8 @@ int gdal_get_best_overview(GDALDatasetH ds, struct extent *extent)
         GDALRasterBandH ovh = GDALGetOverview(bandh, count);
         nFactor = GDALGetRasterXSize(ds) / GDALGetRasterBandXSize(ovh);
         dPixelsPerCell = extent->dMetersPerCell / (adfTransform[1] * nFactor);
-        if( ( dPixelsPerCell > PIX_PER_CELL ) && 
-            ( ( dPixelsPerCell - PIX_PER_CELL ) < ( dBestPixelsPerCell - PIX_PER_CELL ) ) )
+        if( ( dPixelsPerCell > PIX_PER_CELL ) &&
+                ( ( dPixelsPerCell - PIX_PER_CELL ) < ( dBestPixelsPerCell - PIX_PER_CELL ) ) )
         {
             dBestPixelsPerCell = dPixelsPerCell;
             nBestIndex = count + 1;
@@ -1165,7 +1169,7 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
     if( fh != NULL )
     {
         fprintf( fh, "width = %d height = %d\n", im->w, im->h );
-        
+
         for( ycount = 0; ycount < im->h; ycount++ )
         {
             for( xcount = 0; xcount < im->w*depth; xcount++ )
@@ -1189,34 +1193,34 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
     float dVal;
     GDALRasterAttributeTableH rath;
 
-        pszMin = GDALGetMetadataItem(bandh,"STATISTICS_MINIMUM",NULL);
-        pszMax = GDALGetMetadataItem(bandh,"STATISTICS_MAXIMUM",NULL);
-        if( (pszMin == NULL) || (pszMax == NULL))
+    pszMin = GDALGetMetadataItem(bandh,"STATISTICS_MINIMUM",NULL);
+    pszMax = GDALGetMetadataItem(bandh,"STATISTICS_MAXIMUM",NULL);
+    if( (pszMin == NULL) || (pszMax == NULL))
+    {
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
+        return -1;
+    }
+
+    dMin = atof(pszMin);
+    dMax = atof(pszMax);
+
+    /* Get the stats for the Band */
+    if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV)
+    {
+        pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
+        pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
+        if( ( pszStdDev == NULL ) || ( pszMean == NULL ) )
         {
             snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
             return -1;
         }
 
-        dMin = atof(pszMin);
-        dMax = atof(pszMax);
+        stddev = atof( pszStdDev );
+        mean = atof( pszMean );
 
-      /* Get the stats for the Band */
-      if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV)
-      {
-          pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
-          pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
-          if( ( pszStdDev == NULL ) || ( pszMean == NULL ) )
-          {
-            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
-            return -1;
-          }
-      
-          stddev = atof( pszStdDev );
-          mean = atof( pszMean );
-      
-          /* now apply the standard deviation stretch */
-          for( n = 0; n < size; n++)
-          {
+        /* now apply the standard deviation stretch */
+        for( n = 0; n < size; n++)
+        {
             if((pBuffer[n] <= dMin) || (pBuffer[n] == 0))
                 pBuffer[n] = 0;
             else if(pBuffer[n] >= dMax)
@@ -1231,10 +1235,10 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
                 else
                     pBuffer[n] = dVal;
             }
-          }
-      }
-      else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST)
-      {
+        }
+    }
+    else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST)
+    {
         /* Read the histogram */
         rath = GDALGetDefaultRAT(bandh);
         if(rath == NULL)
@@ -1252,7 +1256,7 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
                 GDALRATValuesIOAsInteger(rath, GF_Read, n, 0, nbins, pHisto);
             }
         }
-        
+
         if(pHisto == NULL)
         {
             snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Histogram not available. Run gdalcalcstats first" );
@@ -1262,7 +1266,7 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
         dSumHisto = 0;
         for( n = 0; n < nbins; n++)
             dSumHisto += pHisto[n];
-        
+
         dBandLower = dSumHisto * stretch->stretchparam[0];
         dBandUpper = dSumHisto * stretch->stretchparam[1];
 
@@ -1311,9 +1315,9 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
             }
         }
 
-      }
-      else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
-      {
+    }
+    else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
+    {
         dStep = (dMax - dMin) / 255.0;
 
         /* linear stretch */
@@ -1334,12 +1338,12 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
                     pBuffer[n] = dVal;
             }
         }
-      }
-      else if( stretch->stretchmode != VIEWER_STRETCHMODE_NONE)
-      {
+    }
+    else if( stretch->stretchmode != VIEWER_STRETCHMODE_NONE)
+    {
         snprintf( szGDALMessages, GDAL_ERROR_SIZE, "stretch not currently supported" );
         return -1;
-      }
+    }
 
     return 1;
 }
@@ -1353,7 +1357,7 @@ struct readInfo
 };
 
 int prepare_for_reading(int dataWidth, int dataHeight, GDALDatasetH ds, GDALRasterBandH ovh, struct extent *extent,
-            struct readInfo *info)
+                        struct readInfo *info)
 {
     double adfTransform[6], adfInvertTransform[6], x1, y1, x2, y2;
     int tlx, tly, brx, bry, width, height, nFactor;
@@ -1450,7 +1454,7 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     float *pBuffer;
     struct readInfo info;
     GDALRasterBandH ovh;
-    
+
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,stretch->bands[0]);
     if( overviewIndex == 0 )
@@ -1469,53 +1473,53 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
         /* error should already be set */
         return -1;
     }
-    
+
     im->pixels = (char*)CPLCalloc(im->w * im->h, IMG_DEPTH);
     pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
-    /* read in our 3 bands */    
+    /* read in our 3 bands */
     for( count = 0; count < 3; count++ )
     {
-      /* read in band interleaved by pixel */
-      /* Basically we make each line 3 times as long */
-      /* the first bixel is band[0], second is band[1] and third is band[2] */
-      /* and then back to band[0] etc. So we call RasterIO 3 times, one for */
-      /* each band and tell it to fill in every third pixel each time */
-      bandh = GDALGetRasterBand(ds,stretch->bands[count]);
-      if( overviewIndex == 0 )
-      {
-          ovh = bandh;
-      }
-      else
-      {
-          ovh = GDALGetOverview(bandh,overviewIndex - 1);
-      }
+        /* read in band interleaved by pixel */
+        /* Basically we make each line 3 times as long */
+        /* the first bixel is band[0], second is band[1] and third is band[2] */
+        /* and then back to band[0] etc. So we call RasterIO 3 times, one for */
+        /* each band and tell it to fill in every third pixel each time */
+        bandh = GDALGetRasterBand(ds,stretch->bands[count]);
+        if( overviewIndex == 0 )
+        {
+            ovh = bandh;
+        }
+        else
+        {
+            ovh = GDALGetOverview(bandh,overviewIndex - 1);
+        }
 
-      GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
-            &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
-            GDT_Float32, sizeof(float), im->w * sizeof(float) );
+        GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
+                      &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
+                      GDT_Float32, sizeof(float), im->w * sizeof(float) );
 
-      if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
-      {
-          CPLFree(im->pixels);
-          CPLFree(pBuffer);
-          return -1;
-      }
+        if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
+        {
+            CPLFree(im->pixels);
+            CPLFree(pBuffer);
+            return -1;
+        }
 
-      /* copy into our bil */
-      outcount = count;
-      for(incount = 0; incount < (im->w * im->h); incount++ )
-      {
-         im->pixels[outcount] = pBuffer[incount];
-         outcount += IMG_DEPTH;
-      }
+        /* copy into our bil */
+        outcount = count;
+        for(incount = 0; incount < (im->w * im->h); incount++ )
+        {
+            im->pixels[outcount] = pBuffer[incount];
+            outcount += IMG_DEPTH;
+        }
 
     }
 
 
     /* Create the libcaca dither */
     im->dither = caca_create_dither(8 * IMG_DEPTH, im->w, im->h, IMG_DEPTH * im->w,
-                                     RMASK, GMASK, BMASK, AMASK);
+                                    RMASK, GMASK, BMASK, AMASK);
     if(!im->dither)
     {
         CPLFree(im->pixels);
@@ -1525,7 +1529,7 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     }
 
     CPLFree(pBuffer);
-    
+
     return 0;
 }
 
@@ -1539,7 +1543,7 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     GDALRATFieldUsage eUsage;
     struct readInfo info;
     GDALRasterBandH ovh;
-    
+
     /* fill in the width and height from the overview */
     GDALRasterBandH bandh = GDALGetRasterBand(ds,stretch->bands[0]);
     if( overviewIndex == 0 )
@@ -1561,21 +1565,21 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
         /* error should already be set */
         return -1;
     }
-    
+
     im->pixels = (char*)CPLCalloc(im->w * im->h, IMG_DEPTH);
     pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
     GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
-            &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
-            GDT_Float32, sizeof(float), im->w * sizeof(float) );
+                  &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
+                  GDT_Float32, sizeof(float), im->w * sizeof(float) );
 
-   if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
-   {
-      CPLFree(im->pixels);
-      CPLFree(pBuffer);
-      return -1;
-   }
-    
+    if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
+    {
+        CPLFree(im->pixels);
+        CPLFree(pBuffer);
+        return -1;
+    }
+
     if( stretch->mode == VIEWER_MODE_COLORTABLE )
     {
         /* Need to grab the RAT and read the colour columns */
@@ -1619,17 +1623,17 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
             return -1;
         }
 
-          /* look up the colours and put into our bil */
-          outcount = 0;
-          for(incount = 0; incount < (im->w * im->h); incount++ )
-          {
-             im->pixels[outcount] = pRed[(int)pBuffer[incount]];
-             outcount++;
-             im->pixels[outcount] = pGreen[(int)pBuffer[incount]];
-             outcount++;
-             im->pixels[outcount] = pBlue[(int)pBuffer[incount]];
-             outcount++;
-          }
+        /* look up the colours and put into our bil */
+        outcount = 0;
+        for(incount = 0; incount < (im->w * im->h); incount++ )
+        {
+            im->pixels[outcount] = pRed[(int)pBuffer[incount]];
+            outcount++;
+            im->pixels[outcount] = pGreen[(int)pBuffer[incount]];
+            outcount++;
+            im->pixels[outcount] = pBlue[(int)pBuffer[incount]];
+            outcount++;
+        }
 
         CPLFree(pRed);
         CPLFree(pGreen);
@@ -1638,17 +1642,17 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     }
     else if( stretch->mode == VIEWER_MODE_GREYSCALE )
     {
-      /* copy into our bil and repeat the colours */
-      outcount = 0;
-      for(incount = 0; incount < (im->w * im->h); incount++ )
-      {
-         im->pixels[outcount] = pBuffer[incount];
-         outcount++;
-         im->pixels[outcount] = pBuffer[incount];
-         outcount++;
-         im->pixels[outcount] = pBuffer[incount];
-         outcount++;
-      }
+        /* copy into our bil and repeat the colours */
+        outcount = 0;
+        for(incount = 0; incount < (im->w * im->h); incount++ )
+        {
+            im->pixels[outcount] = pBuffer[incount];
+            outcount++;
+            im->pixels[outcount] = pBuffer[incount];
+            outcount++;
+            im->pixels[outcount] = pBuffer[incount];
+            outcount++;
+        }
 
     }
     else
@@ -1661,7 +1665,7 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
 
     /* Create the libcaca dither */
     im->dither = caca_create_dither(8 * IMG_DEPTH, im->w, im->h, IMG_DEPTH * im->w,
-                                     RMASK, GMASK, BMASK, AMASK);
+                                    RMASK, GMASK, BMASK, AMASK);
     if(!im->dither)
     {
         CPLFree(im->pixels);
@@ -1672,15 +1676,15 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
 
 
     CPLFree(pBuffer);
-    
+
     return 0;
 }
 
 /* returns a newly malloced string describing the stretch */
 char *get_stretch_as_string(struct stretch *stretch)
 {
-char szMode[GDAL_ERROR_SIZE], *pszStr;
-char szStretchMode[GDAL_ERROR_SIZE];
+    char szMode[GDAL_ERROR_SIZE], *pszStr;
+    char szStretchMode[GDAL_ERROR_SIZE];
 
     szMode[0] = '\0';
     if( stretch->mode == VIEWER_MODE_COLORTABLE )
@@ -1689,7 +1693,7 @@ char szStretchMode[GDAL_ERROR_SIZE];
         snprintf(szMode, GDAL_ERROR_SIZE, "GreyScale %d", stretch->bands[0]);
     else if( stretch->mode == VIEWER_MODE_RGB )
         snprintf(szMode, GDAL_ERROR_SIZE, "RGB %d %d %d", stretch->bands[0],
-            stretch->bands[1], stretch->bands[2]);
+                 stretch->bands[1], stretch->bands[2]);
     else if( stretch->mode == VIEWER_MODE_PSEUDOCOLOR )
         snprintf(szMode, GDAL_ERROR_SIZE, "PseudoColor %d", stretch->bands[0]);
 
@@ -1697,13 +1701,13 @@ char szStretchMode[GDAL_ERROR_SIZE];
     if( stretch->stretchmode == VIEWER_STRETCHMODE_NONE )
         snprintf(szStretchMode, GDAL_ERROR_SIZE, " No Stretch");
     else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
-        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Linear Stretch %.2f - %.2f", 
-            stretch->stretchparam[0], stretch->stretchparam[1]);
+        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Linear Stretch %.2f - %.2f",
+                 stretch->stretchparam[0], stretch->stretchparam[1]);
     else if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV )
         snprintf(szStretchMode, GDAL_ERROR_SIZE, " Standard Deviation %.2f", stretch->stretchparam[0]);
     else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST )
-        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Histogram Stretch %.2f - %.2f", 
-            stretch->stretchparam[0], stretch->stretchparam[1]);
+        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Histogram Stretch %.2f - %.2f",
+                 stretch->stretchparam[0], stretch->stretchparam[1]);
 
     pszStr = CPLMalloc(strlen(szMode) + strlen(szStretchMode) + 1);
     strcpy(pszStr, szMode);
@@ -1712,8 +1716,8 @@ char szStretchMode[GDAL_ERROR_SIZE];
 }
 
 /* pCmdStretch non-NULL if they have passed in a stretch on the command line */
-int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlist *stretchList, 
-                    struct stretch *pCmdStretch)
+int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlist *stretchList,
+                   struct stretch *pCmdStretch)
 {
     int xsize, ysize;
 
@@ -1724,9 +1728,9 @@ int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlis
     file->ds = GDALOpen(pszFile, GA_ReadOnly);
     if( file->ds == NULL )
     {
-      CPLFree(im);
-      snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not open %s with GDAL", pszFile );
-      return 0;
+        CPLFree(im);
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not open %s with GDAL", pszFile );
+        return 0;
     }
 
     /* get the stretch */
@@ -1766,7 +1770,7 @@ int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlis
     file->fullExtent.dCentreX = file->adfTransform[0] + file->adfTransform[1] * (xsize / 2);
     file->fullExtent.dCentreY = file->adfTransform[3] + file->adfTransform[5] * (ysize / 2);
     file->fullExtent.dMetersPerCell = MAX((file->adfTransform[1] * xsize) / ww,
-                    (-file->adfTransform[5] * ysize) / wh);
+                                          (-file->adfTransform[5] * ysize) / wh);
 
     return 1;
 }
@@ -1787,31 +1791,31 @@ extern struct image * gdal_load_image(struct gdalFile *file, struct extent *exte
 
     /* create our image structure */
     im = CPLMalloc(sizeof(struct image));
-    
+
     /* Find the best overview level to use */
     overviewIndex = gdal_get_best_overview(file->ds, extent);
-   
+
     if( file->stretch->mode == VIEWER_MODE_RGB )
     {
-      if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
-      {
-        /* trap error. Should have filled in message */
-        CPLFree(im);
-        gdal_close_file(file);
-        return NULL;
-      }
+        if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
+        {
+            /* trap error. Should have filled in message */
+            CPLFree(im);
+            gdal_close_file(file);
+            return NULL;
+        }
     }
     else
     {
-      if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
-      {
-        /* trap error. Should have filled in message */
-        CPLFree(im);
-        gdal_close_file(file);
-        return NULL;
-      }
+        if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
+        {
+            /* trap error. Should have filled in message */
+            CPLFree(im);
+            gdal_close_file(file);
+            return NULL;
+        }
     }
-    
+
     return im;
 }
 
