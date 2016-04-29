@@ -35,13 +35,25 @@ mark_as_advanced(CMAKE_VERBOSE_MAKEFILE)
 # Check the required libraries are present
 
 include_directories(${LIBCACA_INCLUDE_DIR})
-set(LIBCACA_LIBRARIES -L${LIBCACA_LIB_PATH} -lcaca )
-
+if(MSVC)
+    set(LIBCACA_LIBRARIES -LIBPATH:"${LIBCACA_LIB_PATH}" libcaca.lib)
+else()
+    set(LIBCACA_LIBRARIES -L${LIBCACA_LIB_PATH} -lcaca)
+endif()
+    
 include_directories(${GDAL_INCLUDE_DIR})
-set(GDAL_LIBRARIES -L${GDAL_LIB_PATH} -lgdal)
+if(MSVC)
+    set(GDAL_LIBRARIES -LIBPATH:"${GDAL_LIB_PATH}" gdal_i.lib)
+else()
+    set(GDAL_LIBRARIES -L${GDAL_LIB_PATH} -lgdal)
+endif()
 
 if(NOT MSVC)
     set(MATH_LIBRARY -lm)
+endif()
+
+if(MSVC)
+    add_definitions("-D_CRT_SECURE_NO_WARNINGS")
 endif()
 ###############################################################################
 
