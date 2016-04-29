@@ -742,8 +742,8 @@ int main(int argc, char **argv)
 #endif
                     if( fscanf(fp, "%llu %lf %lf %lf\n", &pid, &dX, &dY, &dMetersPerCell) == 4 )
                     {
-                        if( (currpid != pid ) || (dX != dispExtent.dCentreX) || (dY != dispExtent.dCentreY)
-                                || (dMetersPerCell != dispExtent.dMetersPerCell) )
+                        if( (currpid != pid ) && ( (dX != dispExtent.dCentreX) || (dY != dispExtent.dCentreY)
+                                || (dMetersPerCell != dispExtent.dMetersPerCell) ) )
                         {
                             /* don't bother with our own pid or location */
                             dispExtent.dCentreX = dX;
