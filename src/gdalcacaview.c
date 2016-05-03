@@ -15,8 +15,11 @@
 #include <stdlib.h>
 
 #if !defined(_WIN32) || defined(__CYGWIN__)
-#include <sys/types.h>
-#include <pwd.h>
+    #include <sys/types.h>
+    #include <pwd.h>
+#else
+    /* GetCurrentProcessId() */
+    #include <windows.h>
 #endif
 
 #include "caca.h"
