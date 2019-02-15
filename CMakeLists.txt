@@ -2,19 +2,16 @@
 # Set Project name and version
 project (GDALCACAVIEW)
 
-set (PROJECT_SOURCE_DIR src)
+set(PROJECT_SOURCE_DIR src)
 set(GDALCACAVIEW_BIN_NAME gdalcacaview)
 
-set(GDAL_INCLUDE_DIR /usr/local/include CACHE PATH "Include PATH for GDAL")
-set(GDAL_LIB_PATH /usr/local/lib CACHE PATH "Library PATH for GDAL")
-
-set(LIBCACA_INCLUDE_DIR /usr/local/include CACHE PATH "Include PATH for libcaca")
-set(LIBCACA_LIB_PATH /usr/local/lib CACHE PATH "Library PATH for libcaca")
 ###############################################################################
 
 ###############################################################################
 # CMake settings
 cmake_minimum_required(VERSION 2.6.0)
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
 IF(NOT CMAKE_BUILD_TYPE)
   #SET(CMAKE_BUILD_TYPE "DEBUG")
@@ -34,19 +31,11 @@ mark_as_advanced(CMAKE_VERBOSE_MAKEFILE)
 ###############################################################################
 # Check the required libraries are present
 
+find_package(GDAL REQUIRED)
+find_package(libcaca REQUIRED)
+
 include_directories(${LIBCACA_INCLUDE_DIR})
-if(MSVC)
-    set(LIBCACA_LIBRARIES -LIBPATH:"${LIBCACA_LIB_PATH}" libcaca.lib)
-else()
-    set(LIBCACA_LIBRARIES -L${LIBCACA_LIB_PATH} -lcaca)
-endif()
-    
 include_directories(${GDAL_INCLUDE_DIR})
-if(MSVC)
-    set(GDAL_LIBRARIES -LIBPATH:"${GDAL_LIB_PATH}" gdal_i.lib)
-else()
-    set(GDAL_LIBRARIES -L${GDAL_LIB_PATH} -lgdal)
-endif()
 
 if(NOT MSVC)
     set(MATH_LIBRARY -lm)
@@ -59,12 +48,14 @@ endif()
 
 ###############################################################################
 # Build executables
-if(CMAKE_COMPILER_IS_GNUCC)
-    set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "-Wl,-rpath ${GDAL_LIB_PATH}")
+get_filename_component(GDAL_PATH ${GDAL_LIBRARY} DIRECTORY)
+if(APPLE)
+    set(CMAKE_MACOSX_RPATH 1)
 endif()
+set(CMAKE_INSTALL_RPATH "${GDAL_PATH}")
 
 add_executable(${GDALCACAVIEW_BIN_NAME} ${PROJECT_SOURCE_DIR}/gdalcacaview.c)
-target_link_libraries(${GDALCACAVIEW_BIN_NAME} ${GDAL_LIBRARIES} ${LIBCACA_LIBRARIES} ${MATH_LIBRARY})
+target_link_libraries(${GDALCACAVIEW_BIN_NAME} ${GDAL_LIBRARY} ${libcaca_LIBRARY} ${MATH_LIBRARY})
 install(TARGETS ${GDALCACAVIEW_BIN_NAME} DESTINATION bin PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
 ###############################################################################
