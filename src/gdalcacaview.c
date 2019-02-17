@@ -56,6 +56,10 @@
 #endif
 #define IMG_DEPTH 3
 
+/* For estimatic stats if they aren't available */
+#define MIN_OVERVIEW_STATS 100
+#define MAX_OVERVIEW_STATS 400
+
 /* libcaca/libcaca contexts */
 caca_canvas_t *cv;
 caca_display_t *dp;
@@ -98,7 +102,6 @@ struct image
 #define VIEWER_STRETCHMODE_NONE 1 /* color table, or pre stretched data */
 #define VIEWER_STRETCHMODE_LINEAR 2
 #define VIEWER_STRETCHMODE_STDDEV 3
-#define VIEWER_STRETCHMODE_HIST 4
 
 struct stretch
 {
@@ -125,12 +128,21 @@ struct extent
     double dCentreX, dCentreY, dMetersPerCell;
 };
 
+struct statisticsForBand
+{
+    double dMin;
+    double dMax;
+    double dMean;
+    double dStdDev;
+};
+
 struct gdalFile
 {
     GDALDatasetH ds;
     struct extent fullExtent;
     struct stretch *stretch;
     double adfTransform[6];
+    struct statisticsForBand statsForStretchBands[3];
 };
 
 /* Local functions */
@@ -251,8 +263,6 @@ int stretchpart_from_string(struct stretch *newStretch, const char *pszString)
         newStretch->stretchmode = VIEWER_STRETCHMODE_LINEAR;
     else if( strcmp(pszTmp, "stddev") == 0)
         newStretch->stretchmode = VIEWER_STRETCHMODE_STDDEV;
-    else if( strcmp(pszTmp, "histogram") == 0)
-        newStretch->stretchmode = VIEWER_STRETCHMODE_HIST;
     else
     {
         fprintf(stderr, "Unable to understand stretch mode %s\n", pszTmp);
@@ -1194,51 +1204,27 @@ void gdal_dump_image(const char *pszFilename,int depth, struct image *im)
 }
 
 /* stretches data to range 0-255 based on the current stretch */
-/* TODO: cache this information between stretches */
-int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *stretch)
+int do_stretch(float *pBuffer, GDALRasterBandH bandh, struct statisticsForBand *pStats,
+                    int size, struct stretch *stretch)
 {
-    int n, nbins, *pHisto = NULL;
-    const char *pszStdDev, *pszMean, *pszMin, *pszMax;
-    double stddev, mean, dMin, dMax, dStep;
-    double dSumHisto, dSumVals, dBandLower, dBandUpper, dStretchMin, dStretchMax;
+    int n;
+    double dStep;
     float dVal;
-    GDALRasterAttributeTableH rath;
 
-    pszMin = GDALGetMetadataItem(bandh,"STATISTICS_MINIMUM",NULL);
-    pszMax = GDALGetMetadataItem(bandh,"STATISTICS_MAXIMUM",NULL);
-    if( (pszMin == NULL) || (pszMax == NULL))
-    {
-        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
-        return -1;
-    }
-
-    dMin = atof(pszMin);
-    dMax = atof(pszMax);
-
-    /* Get the stats for the Band */
+    /* Do the right thing depedning on stretch */
     if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV)
     {
-        pszStdDev = GDALGetMetadataItem(bandh,"STATISTICS_STDDEV",NULL);
-        pszMean = GDALGetMetadataItem(bandh,"STATISTICS_MEAN",NULL);
-        if( ( pszStdDev == NULL ) || ( pszMean == NULL ) )
-        {
-            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Statistics not available. Run gdalcalcstats first" );
-            return -1;
-        }
-
-        stddev = atof( pszStdDev );
-        mean = atof( pszMean );
 
         /* now apply the standard deviation stretch */
         for( n = 0; n < size; n++)
         {
-            if((pBuffer[n] <= dMin) || (pBuffer[n] == 0))
+            if((pBuffer[n] <= pStats->dMin) || (pBuffer[n] == 0))
                 pBuffer[n] = 0;
-            else if(pBuffer[n] >= dMax)
+            else if(pBuffer[n] >= pStats->dMax)
                 pBuffer[n] = 255;
             else
             {
-                dVal = ((pBuffer[n] - mean + stddev * stretch->stretchparam[0]) * 255)/(stddev * 2 *stretch->stretchparam[0]);
+                dVal = ((pBuffer[n] - pStats->dMean + pStats->dStdDev * stretch->stretchparam[0]) * 255)/(pStats->dStdDev * 2 *stretch->stretchparam[0]);
                 if( dVal < 0 )
                     pBuffer[n] = 0;
                 else if( dVal > 255 )
@@ -1247,100 +1233,21 @@ int do_stretch(float *pBuffer, GDALRasterBandH bandh, int size, struct stretch *
                     pBuffer[n] = dVal;
             }
         }
-    }
-    else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST)
-    {
-        /* Read the histogram */
-        rath = GDALGetDefaultRAT(bandh);
-        if(rath == NULL)
-        {
-            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Histogram not available. Run gdalcalcstats first" );
-            return -1;
-        }
-
-        nbins = GDALRATGetRowCount(rath);
-        for( n = 0; n < GDALRATGetColumnCount(rath); n++)
-        {
-            if( GDALRATGetUsageOfCol(rath, n) == GFU_PixelCount)
-            {
-                pHisto = (int*)CPLMalloc(nbins * sizeof(int));
-                GDALRATValuesIOAsInteger(rath, GF_Read, n, 0, nbins, pHisto);
-            }
-        }
-
-        if(pHisto == NULL)
-        {
-            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Histogram not available. Run gdalcalcstats first" );
-            return -1;
-        }
-
-        dSumHisto = 0;
-        for( n = 0; n < nbins; n++)
-            dSumHisto += pHisto[n];
-
-        dBandLower = dSumHisto * stretch->stretchparam[0];
-        dBandUpper = dSumHisto * stretch->stretchparam[1];
-
-        dStretchMin = dMin;
-        dStretchMax = dMax;
-        dSumVals = 0;
-        for( n = 0; n < nbins; n++ )
-        {
-            dSumVals += pHisto[n];
-            if( dSumVals > dBandLower )
-            {
-                dStretchMin = dMin + ((dMax - dMin) * (n / nbins));
-                break;
-            }
-        }
-
-        dSumVals = 0;
-        for( n = nbins; n >= 0; n-- )
-        {
-            dSumVals += pHisto[n];
-            if( dSumVals > dBandUpper )
-            {
-                dStretchMax = dMax + ((nbins - n - 1) / nbins);
-                break;
-            }
-        }
-
-        CPLFree(pHisto);
-
-        dStep = (dStretchMax - dStretchMin) / 255.0;
-        for( n = 0; n < size; n++)
-        {
-            if(pBuffer[n] <= dStretchMin)
-                pBuffer[n] = 0;
-            else if(pBuffer[n] >= dStretchMax)
-                pBuffer[n] = 255;
-            else
-            {
-                dVal = (pBuffer[n] - dStretchMin) * dStep;
-                if( dVal < 0 )
-                    pBuffer[n] = 0;
-                else if( dVal > 255 )
-                    pBuffer[n] = 255;
-                else
-                    pBuffer[n] = dVal;
-            }
-        }
-
     }
     else if( stretch->stretchmode == VIEWER_STRETCHMODE_LINEAR )
     {
-        dStep = (dMax - dMin) / 255.0;
+        dStep = (pStats->dMax - pStats->dMin) / 255.0;
 
         /* linear stretch */
         for( n = 0; n < size; n++)
         {
-            if(pBuffer[n] <= dMin)
+            if(pBuffer[n] <= pStats->dMin)
                 pBuffer[n] = 0;
-            else if(pBuffer[n] >= dMax)
+            else if(pBuffer[n] >= pStats->dMax)
                 pBuffer[n] = 255;
             else
             {
-                dVal = (pBuffer[n] - dMin) * dStep;
+                dVal = (pBuffer[n] - pStats->dMin) * dStep;
                 if( dVal < 0 )
                     pBuffer[n] = 0;
                 else if( dVal > 255 )
@@ -1458,7 +1365,8 @@ int prepare_for_reading(int dataWidth, int dataHeight, GDALDatasetH ds, GDALRast
     return 1;
 }
 
-int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, struct extent *extent)
+int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, 
+        struct statisticsForBand *pStats, struct extent *extent)
 {
     int count;
     int incount, outcount;
@@ -1506,11 +1414,17 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
             ovh = GDALGetOverview(bandh,overviewIndex - 1);
         }
 
-        GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
+        if( GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
                       &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
-                      GDT_Float32, sizeof(float), im->w * sizeof(float) );
+                      GDT_Float32, sizeof(float), im->w * sizeof(float) ) != CE_None )
+        {
+            CPLFree(im->pixels);
+            CPLFree(pBuffer);
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to read file" );
+            return -1;
+        }
 
-        if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
+        if( do_stretch(pBuffer, bandh, &pStats[count], im->w * im->h, stretch) < 0 )
         {
             CPLFree(im->pixels);
             CPLFree(pBuffer);
@@ -1544,7 +1458,8 @@ int gdal_read_multiband(GDALDatasetH ds,struct image *im,int overviewIndex, stru
     return 0;
 }
 
-int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, struct extent *extent)
+int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, struct stretch *stretch, 
+    struct statisticsForBand *pStats, struct extent *extent)
 {
     /* Read a single band image */
     int count, outcount, incount;
@@ -1580,11 +1495,17 @@ int gdal_read_singleband(GDALDatasetH ds,struct image *im,int overviewIndex, str
     im->pixels = (char*)CPLCalloc(im->w * im->h, IMG_DEPTH);
     pBuffer = (float*)CPLCalloc(im->w * im->h, sizeof(float));
 
-    GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
+    if( GDALRasterIO( ovh, GF_Read, info.nXOff, info.nYOff, info.nXSize, info.nYSize,
                   &pBuffer[info.nDataOffset], info.nBufXSize, info.nBufYSize,
-                  GDT_Float32, sizeof(float), im->w * sizeof(float) );
+                  GDT_Float32, sizeof(float), im->w * sizeof(float) ) != CE_None )
+    {
+        CPLFree(im->pixels);
+        CPLFree(pBuffer);
+        snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Unable to read file" );
+        return -1;
+    }
 
-    if( do_stretch(pBuffer, bandh, im->w * im->h, stretch) < 0 )
+    if( do_stretch(pBuffer, bandh, &pStats[0], im->w * im->h, stretch) < 0 )
     {
         CPLFree(im->pixels);
         CPLFree(pBuffer);
@@ -1716,9 +1637,6 @@ char *get_stretch_as_string(struct stretch *stretch)
                  stretch->stretchparam[0], stretch->stretchparam[1]);
     else if( stretch->stretchmode == VIEWER_STRETCHMODE_STDDEV )
         snprintf(szStretchMode, GDAL_ERROR_SIZE, " Standard Deviation %.2f", stretch->stretchparam[0]);
-    else if( stretch->stretchmode == VIEWER_STRETCHMODE_HIST )
-        snprintf(szStretchMode, GDAL_ERROR_SIZE, " Histogram Stretch %.2f - %.2f",
-                 stretch->stretchparam[0], stretch->stretchparam[1]);
 
     pszStr = CPLMalloc(strlen(szMode) + strlen(szStretchMode) + 1);
     strcpy(pszStr, szMode);
@@ -1726,11 +1644,64 @@ char *get_stretch_as_string(struct stretch *stretch)
     return pszStr;
 }
 
+int getStatistics(GDALDatasetH ds, int band, struct statisticsForBand *pStats)
+{
+    const char *pszMin, *pszMax, *pszStdDev, *pszMean;
+    int nOverviews, index, xsize, ysize;
+    GDALRasterBandH overviewh;
+    GDALRasterBandH bandh = GDALGetRasterBand(ds, band);
+
+    pszMin = GDALGetMetadataItem(bandh, "STATISTICS_MINIMUM", NULL);
+    pszMax = GDALGetMetadataItem(bandh, "STATISTICS_MAXIMUM", NULL);
+    pszStdDev = GDALGetMetadataItem(bandh, "STATISTICS_STDDEV", NULL);
+    pszMean = GDALGetMetadataItem(bandh, "STATISTICS_MEAN", NULL);
+    if( (pszMin == NULL ) || (pszMax == NULL) || (pszStdDev == NULL) || (pszMean == NULL ) )
+    {
+        /* No Stats - get overview and use that */
+        nOverviews = GDALGetOverviewCount(bandh);
+        for( index = 0; index < nOverviews; index++ )
+        {
+            overviewh = GDALGetOverview(bandh, index);
+            xsize = GDALGetRasterBandXSize(overviewh);
+            ysize = GDALGetRasterBandYSize(overviewh);
+            if( (xsize > MIN_OVERVIEW_STATS) && (xsize < MAX_OVERVIEW_STATS) &&
+                (ysize > MIN_OVERVIEW_STATS) && (ysize < MAX_OVERVIEW_STATS) )
+            {
+                if( GDALComputeRasterStatistics(overviewh, TRUE, &pStats->dMin, &pStats->dMax,
+                        &pStats->dMean, &pStats->dStdDev, NULL, NULL) == CE_None)
+                {
+                    return TRUE;
+                }
+            }
+        }
+
+        /* No valid overviews - estimate on whole band */
+        if( GDALComputeRasterStatistics(bandh, TRUE, &pStats->dMin, &pStats->dMax,
+                        &pStats->dMean, &pStats->dStdDev, NULL, NULL) == CE_None)
+        {
+            return TRUE;
+        }
+        else 
+        {
+            return FALSE;
+        }
+    }
+    else
+    {
+        /* convert from strings */
+        pStats->dMin = atof(pszMin);
+        pStats->dMax = atof(pszMax);
+        pStats->dMean = atof(pszMean);
+        pStats->dStdDev = atof(pszStdDev);
+        return TRUE;
+    }
+}
+
 /* pCmdStretch non-NULL if they have passed in a stretch on the command line */
 int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlist *stretchList,
                    struct stretch *pCmdStretch)
 {
-    int xsize, ysize;
+    int xsize, ysize, count;
 
     /* reset error message buffer */
     szGDALMessages[0] = '\0';
@@ -1759,6 +1730,32 @@ int gdal_open_file(char const *pszFile, struct gdalFile *file, struct stretchlis
             return 0;
         }
     }
+
+    /* Get statistics */
+    if( file->stretch->mode == VIEWER_MODE_GREYSCALE )
+    {
+        if( !getStatistics(file->ds, file->stretch->bands[0], 
+                &file->statsForStretchBands[0]) )
+        {
+            gdal_close_file(file);
+            snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not get statistics for %s", pszFile );
+            return 0;
+        }
+    }
+    else if( file->stretch->mode == VIEWER_MODE_RGB )
+    {
+        for( count = 0; count < 3; count++ ) 
+        {
+            if( !getStatistics(file->ds, file->stretch->bands[count],
+                &file->statsForStretchBands[count]) ) 
+            {
+                gdal_close_file(file);
+                snprintf( szGDALMessages, GDAL_ERROR_SIZE, "Could not get statistics for %s", pszFile );
+                return 0;
+            }
+        }
+    }
+    /* else not needed for colour table or pseudocolour */
 
     /* status string */
     if(pszStretchStatusString != NULL)
@@ -1808,7 +1805,8 @@ extern struct image * gdal_load_image(struct gdalFile *file, struct extent *exte
 
     if( file->stretch->mode == VIEWER_MODE_RGB )
     {
-        if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
+        if( gdal_read_multiband(file->ds,im,overviewIndex, file->stretch, 
+                file->statsForStretchBands, extent) == -1 )
         {
             /* trap error. Should have filled in message */
             CPLFree(im);
@@ -1818,7 +1816,8 @@ extern struct image * gdal_load_image(struct gdalFile *file, struct extent *exte
     }
     else
     {
-        if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch, extent) == -1 )
+        if( gdal_read_singleband(file->ds,im,overviewIndex, file->stretch, 
+                file->statsForStretchBands, extent) == -1 )
         {
             /* trap error. Should have filled in message */
             CPLFree(im);
