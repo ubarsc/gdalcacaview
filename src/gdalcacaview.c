@@ -37,7 +37,7 @@
 #define GAMMA_FACTOR 1.04f
 #define GAMMA_MAX 100
 #define GAMMA(g) (((g) < 0) ? 1.0 / gammatab[-(g)] : gammatab[(g)])
-#define PIX_PER_CELL 30
+#define PIX_PER_CELL 10
 #define GEOLINK_TIMEOUT 1000000
 
 /* tell libcaca how we have encoded the bytes */
